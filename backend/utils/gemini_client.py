@@ -10,17 +10,19 @@ logger = logging.getLogger(__name__)
 class GeminiClient:
     """Client for interacting with Google's Gemini AI."""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-pro"):
+    def __init__(self, api_key: str, model_name: str = "gemini-2.0-flash"):
         """
         Initialize Gemini client.
         
         Args:
             api_key: Gemini API key
-            model_name: Model name to use (default: gemini-1.5-pro)
+            model_name: Model name to use (default: gemini-2.0-flash)
         """
         genai.configure(api_key=api_key)
+        # Ensure model name has 'models/' prefix for API v0.8+
+        if not model_name.startswith('models/'):
+            model_name = f'models/{model_name}'
         self.model_name = model_name
-        # Use the model directly without 'models/' prefix - the library adds it
         self.model = genai.GenerativeModel(model_name)
         self.chat = None
     
