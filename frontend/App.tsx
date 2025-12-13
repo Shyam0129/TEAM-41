@@ -4,7 +4,7 @@ import { InputArea } from './components/InputArea.tsx';
 import { ToolsModal } from './components/ToolsModal.tsx';
 import { Message, ModelType } from './types.ts';
 import { INITIAL_SUGGESTIONS } from './constants.tsx';
-import { streamChatResponse } from './services/geminiService.ts';
+import { streamChatResponse } from './services/backendService.ts';
 import {
   Share,
   Menu,
@@ -32,6 +32,8 @@ export default function App() {
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
   const [currentModel, setCurrentModel] = useState('Gemini 3 Pro');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [userId] = useState('user_' + Math.random().toString(36).substr(2, 9));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -131,10 +133,11 @@ export default function App() {
     }]);
 
     try {
-      await streamChatResponse(
-        [...messages, userMsg],
+      const response = await streamChatResponse(
+        messages,
         text,
-        ModelType.FLASH,
+        userId,
+        sessionId,
         (chunk) => {
           setMessages(prev => prev.map(msg =>
             msg.id === botMsgId
@@ -144,6 +147,17 @@ export default function App() {
         },
         abortControllerRef.current.signal
       );
+
+      // Update session ID from response
+      if (response.session_id && !sessionId) {
+        setSessionId(response.session_id);
+      }
+
+      // If there are suggested actions, you could handle them here
+      if (response.suggested_actions && response.suggested_actions.length > 0) {
+        console.log('Suggested actions:', response.suggested_actions);
+      }
+
     } catch (error: any) {
       if (error.name === 'AbortError') {
         // Handled by user stopping
@@ -172,6 +186,7 @@ export default function App() {
     setMessages([]);
     setIsWelcomeScreen(true);
     setInputValue('');
+    setSessionId(null); // Reset session for new chat
   };
 
   const handleSuggestionClick = (text: string) => {
