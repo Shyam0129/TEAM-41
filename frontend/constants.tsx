@@ -1,19 +1,5 @@
 import { 
-  Zap, 
-  Globe, 
-  Image as ImageIcon, 
-  Code, 
   MessageSquare, 
-  LayoutGrid, 
-  BookOpen, 
-  Settings,
-  Clock,
-  Star,
-  Activity,
-  Calendar,
-  Mail,
-  FileText,
-  Hash
 } from 'lucide-react';
 import { SidebarSection } from './types.ts';
 
@@ -21,15 +7,11 @@ export const INITIAL_SUGGESTIONS = [
   "✉️ Send an email",
   "📄 Generate a PDF",
   "📅 Schedule a meeting",
-  "💬 Send a Slack message",
-  "🧠 Summarize this"
+  "💬 Send a Slack message"
 ];
 
 export const SIDEBAR_NAVIGATION = [
-  { id: 'home', label: 'Home', icon: LayoutGrid },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'library', label: 'Prompt Library', icon: BookOpen },
-  { id: 'integrations', label: 'Integrations', icon: Zap },
 ];
 
 export const HISTORY_SECTIONS: SidebarSection[] = [

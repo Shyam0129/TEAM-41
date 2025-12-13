@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Sparkles, Command, Bot, Zap, Star, Square, Mic } from 'lucide-react';
+import { Paperclip, ArrowUp, Plus, Zap, Square } from 'lucide-react';
 import { INITIAL_SUGGESTIONS } from '../constants.tsx';
+import { VoiceInput } from './VoiceInput.tsx';
 
 interface InputAreaProps {
   onSend: (message: string) => void;
@@ -16,12 +17,12 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
   const [showPrompts, setShowPrompts] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const promptMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Allow external control of input value (for sidebar clicks)
   useEffect(() => {
     if (value) {
       setInput(value);
-      // Auto-focus when value is set from outside
       if (textareaRef.current) {
         textareaRef.current.focus();
       }
@@ -71,31 +72,69 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
     }
   };
 
+  const handleVoiceInput = (text: string) => {
+    setInput(prev => {
+        const newValue = prev ? `${prev} ${text}` : text;
+        return newValue;
+    });
+    if (textareaRef.current) {
+        textareaRef.current.focus();
+    }
+  };
+  
+  const handleUploadClick = () => {
+      fileInputRef.current?.click();
+      setShowPrompts(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          // Mock upload action
+          const fileName = e.target.files[0].name;
+          setInput(prev => prev ? `${prev} [Attached: ${fileName}]` : `[Attached: ${fileName}]`);
+      }
+  };
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   }, [input]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto relative">
+    <div className="w-full mx-auto relative font-sans">
       
-      {/* Prompt Menu Popup */}
+      {/* Prompt / Upload Menu Popup */}
       {showPrompts && (
-        <div ref={promptMenuRef} className="absolute bottom-full left-0 mb-3 w-72 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
-           <div className="px-4 py-3 border-b border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 flex items-center justify-between">
-             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Quick Prompts</span>
-             <Zap className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+        <div ref={promptMenuRef} className="absolute bottom-full left-0 mb-3 w-72 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
+           
+           {/* Actions Section */}
+           <div className="p-1.5 border-b border-gray-100 dark:border-white/5">
+               <button 
+                  onClick={handleUploadClick}
+                  className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-colors flex items-center gap-3 font-medium"
+               >
+                   <div className="p-1.5 bg-blue-50 dark:bg-blue-500/20 rounded-lg text-blue-600 dark:text-blue-400">
+                      <Paperclip className="w-4 h-4" />
+                   </div>
+                   Upload File
+               </button>
+               <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
            </div>
-           <div className="max-h-64 overflow-y-auto custom-scrollbar p-1">
+
+           <div className="px-4 py-2 bg-gray-50 dark:bg-white/5 flex items-center justify-between">
+             <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Quick Prompts</span>
+           </div>
+           
+           <div className="max-h-60 overflow-y-auto custom-scrollbar p-1.5">
              {INITIAL_SUGGESTIONS.map((suggestion, idx) => (
                <button
                  key={idx}
                  onClick={() => handlePromptClick(suggestion)}
-                 className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-blue-600 dark:hover:text-white rounded-lg transition-colors truncate flex items-center gap-2"
+                 className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-blue-600 dark:hover:text-white rounded-xl transition-colors truncate flex items-center gap-2.5"
                >
-                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50 flex-shrink-0"></span>
+                 <Zap className="w-3.5 h-3.5 text-gray-400" />
                  <span className="truncate">{suggestion}</span>
                </button>
              ))}
@@ -103,33 +142,16 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
         </div>
       )}
 
-      <div className="relative bg-white dark:bg-[#1c1c1e] rounded-2xl border border-gray-200 dark:border-white/10 focus-within:border-blue-400 dark:focus-within:border-white/20 transition-all shadow-xl shadow-black/5 dark:shadow-black/20">
+      <div className="relative bg-white dark:bg-[#1c1c1e] rounded-[26px] border border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/20 focus-within:border-blue-500 dark:focus-within:border-blue-500/50 transition-all shadow-[0_4px_16px_rgba(0,0,0,0.05)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.2)] flex items-end p-2">
         
-        {/* Robot / Prompts Button */}
-        <div className="absolute left-3 top-3 z-10">
+        {/* Plus / Menu Button */}
+        <div className="absolute left-3 bottom-2.5 z-10">
            <button 
              onClick={() => setShowPrompts(!showPrompts)}
-             className="relative p-2 bg-blue-50 dark:bg-[#2c2c2e]/50 hover:bg-blue-100 dark:hover:bg-[#3a3a3c] rounded-lg transition-colors group overflow-visible"
-             title="Open AI prompts"
+             className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#3a3a3c] hover:text-gray-900 dark:hover:text-white rounded-full transition-colors"
+             title="Add..."
            >
-             <Bot className={`w-5 h-5 text-blue-500 dark:text-blue-400 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-transform duration-300 ${showPrompts ? 'scale-110' : ''}`} />
-             
-             {/* Animated Thinking Dots */}
-             {!showPrompts && (
-               <div className="absolute -top-0.5 -right-0.5 flex space-x-[1px] bg-white dark:bg-[#1c1c1e] rounded-full px-1 py-0.5 border border-blue-100 dark:border-blue-500/30">
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.2s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.4s' }}></div>
-               </div>
-             )}
-
-             {/* Magical Floating Particles - Decoration */}
-             {!showPrompts && (
-               <>
-                 <Sparkles className="absolute -top-2 -left-2 w-3 h-3 text-yellow-400 animate-pulse opacity-0 group-hover:opacity-100 transition-opacity duration-700 delay-75" style={{ animationDuration: '2s' }} />
-                 <Star className="absolute -bottom-1 -right-2 w-2.5 h-2.5 text-blue-400 animate-float opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-               </>
-             )}
+             <Plus className={`w-5 h-5 transition-transform duration-300 ${showPrompts ? 'rotate-45' : ''}`} />
            </button>
         </div>
 
@@ -138,50 +160,41 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Rexie anything..."
-          className="w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-base py-4 pr-12 pl-14 rounded-2xl resize-none focus:outline-none min-h-[56px] max-h-[150px] overflow-y-auto scrollbar-hide"
+          placeholder="Ask anything..."
+          className="w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-[15px] py-3.5 pl-14 pr-28 rounded-2xl resize-none focus:outline-none min-h-[52px] max-h-[180px] overflow-y-auto scrollbar-hide leading-relaxed"
           rows={1}
           disabled={disabled && !isGenerating}
         />
         
-        {/* Send / Stop Button */}
-        <button
-          onClick={isGenerating ? handleStop : () => handleSubmit()}
-          disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
-          className={`
-            absolute right-3 top-3 p-1.5 rounded-lg transition-all duration-200
-            ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
-              ? 'bg-blue-600 dark:bg-white text-white dark:text-black hover:bg-blue-700 dark:hover:bg-gray-200 shadow-md' 
-              : 'bg-gray-200 dark:bg-[#2c2c2e] text-gray-400 dark:text-gray-500 cursor-not-allowed'}
-          `}
-        >
-          {isGenerating ? (
-            <Square className="w-4 h-4 fill-current" />
-          ) : (
-            <ArrowUp className="w-4 h-4" />
-          )}
-        </button>
+        {/* Right Actions: Voice & Send */}
+        <div className="absolute right-3 bottom-2.5 flex items-center gap-1.5">
+            <VoiceInput 
+               onInput={handleVoiceInput} 
+               className="p-2.5 rounded-full hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" 
+             />
 
-        {/* Footer Actions inside Input */}
-        <div className="flex items-center justify-between px-3 pb-3 pt-1 ml-11">
-          <div className="flex items-center gap-1">
-             {/* Spacer */}
-          </div>
-
-          <div className="flex items-center gap-1">
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Attach">
-                <Paperclip className="w-4 h-4" />
-             </button>
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Voice">
-                <Mic className="w-4 h-4" />
-             </button>
-          </div>
+            <button
+            onClick={isGenerating ? handleStop : () => handleSubmit()}
+            disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
+            className={`
+                p-2.5 rounded-full transition-all duration-200 flex items-center justify-center
+                ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
+                ? 'bg-blue-600 dark:bg-white text-white dark:text-black hover:bg-blue-700 dark:hover:bg-gray-200 shadow-md transform hover:scale-105' 
+                : 'bg-gray-100 dark:bg-[#2c2c2e] text-gray-300 dark:text-gray-600 cursor-not-allowed'}
+            `}
+            >
+            {isGenerating ? (
+                <Square className="w-4 h-4 fill-current" />
+            ) : (
+                <ArrowUp className="w-5 h-5" />
+            )}
+            </button>
         </div>
       </div>
       
       <div className="text-center mt-3">
-        <p className="text-[10px] text-gray-400 dark:text-gray-600">
-          Rexie can make mistakes. Consider checking important information.
+        <p className="text-[11px] text-gray-400 dark:text-gray-600 font-medium">
+          Rexie is an experimental AI and can make mistakes.
         </p>
       </div>
     </div>
