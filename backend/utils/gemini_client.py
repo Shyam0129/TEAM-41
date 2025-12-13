@@ -2,6 +2,7 @@
 import google.generativeai as genai
 from typing import Optional, Dict, Any, List
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -9,16 +10,17 @@ logger = logging.getLogger(__name__)
 class GeminiClient:
     """Client for interacting with Google's Gemini AI."""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-pro"):
+    def __init__(self, api_key: str, model_name: str = "gemini-1.5-pro"):
         """
         Initialize Gemini client.
         
         Args:
             api_key: Gemini API key
-            model_name: Model name to use
+            model_name: Model name to use (default: gemini-1.5-pro)
         """
         genai.configure(api_key=api_key)
         self.model_name = model_name
+        # Use the model directly without 'models/' prefix - the library adds it
         self.model = genai.GenerativeModel(model_name)
         self.chat = None
     
@@ -147,12 +149,28 @@ class GeminiClient:
         """
         prompt = f"""
         Classify the intent of the following user message into one of these categories:
-        - send_email
-        - create_calendar_event
-        - create_document
-        - send_slack_message
-        - send_sms
-        - general_query
+        
+        Gmail intents:
+        - send_email: User wants to send an email
+        - read_email: User wants to read/list emails
+        - search_email: User wants to search for specific emails
+        - get_unread_emails: User wants to see unread emails
+        - reply_to_email: User wants to reply to an email
+        
+        Calendar intents:
+        - create_calendar_event: User wants to create a calendar event
+        - list_calendar_events: User wants to list calendar events
+        - search_calendar_events: User wants to search for specific events
+        - update_calendar_event: User wants to update an existing event
+        - delete_calendar_event: User wants to delete an event
+        - get_today_events: User wants to see today's events
+        - get_week_events: User wants to see this week's events
+        
+        Other intents:
+        - create_document: User wants to create a document
+        - send_slack_message: User wants to send a Slack message
+        - send_sms: User wants to send an SMS
+        - general_query: General question or conversation
         
         User message: {user_message}
         
@@ -166,3 +184,4 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Failed to classify intent: {e}")
             return "general_query"
+

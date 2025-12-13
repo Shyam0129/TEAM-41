@@ -54,11 +54,29 @@ class LLMRouter:
             Extracted parameters
         """
         schemas = {
+            # Gmail intents
             "send_email": {
                 "to": "email address",
                 "subject": "email subject",
                 "body": "email body content"
             },
+            "read_email": {
+                "max_results": "number of emails to read (default 10)",
+                "query": "search query (optional)"
+            },
+            "search_email": {
+                "query": "search query",
+                "max_results": "number of results (default 10)"
+            },
+            "get_unread_emails": {
+                "max_results": "number of emails (default 10)"
+            },
+            "reply_to_email": {
+                "message_id": "email message ID to reply to",
+                "body": "reply message body"
+            },
+            
+            # Calendar intents
             "create_calendar_event": {
                 "summary": "event title",
                 "start_time": "start date and time",
@@ -66,6 +84,29 @@ class LLMRouter:
                 "description": "event description (optional)",
                 "location": "event location (optional)"
             },
+            "list_calendar_events": {
+                "start_date": "start date (optional)",
+                "end_date": "end date (optional)",
+                "max_results": "number of events (default 10)"
+            },
+            "search_calendar_events": {
+                "query": "search query",
+                "start_date": "start date (optional)",
+                "end_date": "end date (optional)"
+            },
+            "update_calendar_event": {
+                "event_id": "event identifier",
+                "summary": "new title (optional)",
+                "start_time": "new start time (optional)",
+                "end_time": "new end time (optional)"
+            },
+            "delete_calendar_event": {
+                "event_id": "event identifier"
+            },
+            "get_today_events": {},
+            "get_week_events": {},
+            
+            # Other tools
             "create_document": {
                 "title": "document title",
                 "content": "document content"
@@ -105,8 +146,11 @@ class LLMRouter:
         confirmation_required = [
             "send_email",
             "create_calendar_event",
+            "update_calendar_event",
+            "delete_calendar_event",
             "send_slack_message",
-            "send_sms"
+            "send_sms",
+            "reply_to_email"
         ]
         
         return intent in confirmation_required
@@ -127,8 +171,23 @@ class LLMRouter:
             ToolAction object or None if not a tool action
         """
         intent_to_tool = {
+            # Gmail actions
             "send_email": (ToolType.GMAIL, "send_email"),
+            "read_email": (ToolType.GMAIL, "list_messages"),
+            "search_email": (ToolType.GMAIL, "search_messages"),
+            "get_unread_emails": (ToolType.GMAIL, "get_unread_messages"),
+            "reply_to_email": (ToolType.GMAIL, "reply_to_email"),
+            
+            # Calendar actions
             "create_calendar_event": (ToolType.CALENDAR, "create_event"),
+            "list_calendar_events": (ToolType.CALENDAR, "search_events"),
+            "search_calendar_events": (ToolType.CALENDAR, "search_events"),
+            "update_calendar_event": (ToolType.CALENDAR, "update_event"),
+            "delete_calendar_event": (ToolType.CALENDAR, "delete_event"),
+            "get_today_events": (ToolType.CALENDAR, "get_events_today"),
+            "get_week_events": (ToolType.CALENDAR, "get_events_this_week"),
+            
+            # Other tools
             "create_document": (ToolType.DOCS, "create_document"),
             "send_slack_message": (ToolType.SLACK, "send_message"),
             "send_sms": (ToolType.SMS, "send_sms")
@@ -160,16 +219,31 @@ class LLMRouter:
             Confirmation message
         """
         templates = {
-            ToolType.GMAIL: "I'll send an email to {to} with subject '{subject}'. Should I proceed?",
-            ToolType.CALENDAR: "I'll create a calendar event '{summary}' from {start_time} to {end_time}. Should I proceed?",
-            ToolType.DOCS: "I'll create a document titled '{title}'. Should I proceed?",
-            ToolType.SLACK: "I'll send a message to {channel}. Should I proceed?",
-            ToolType.SMS: "I'll send an SMS to {to_number}. Should I proceed?"
+            ToolType.GMAIL: {
+                "send_email": "I'll send an email to {to} with subject '{subject}'. Should I proceed?",
+                "reply_to_email": "I'll reply to the email. Should I proceed?"
+            },
+            ToolType.CALENDAR: {
+                "create_event": "I'll create a calendar event '{summary}' from {start_time} to {end_time}. Should I proceed?",
+                "update_event": "I'll update the calendar event. Should I proceed?",
+                "delete_event": "I'll delete the calendar event. Should I proceed?"
+            },
+            ToolType.DOCS: {
+                "create_document": "I'll create a document titled '{title}'. Should I proceed?"
+            },
+            ToolType.SLACK: {
+                "send_message": "I'll send a message to {channel}. Should I proceed?"
+            },
+            ToolType.SMS: {
+                "send_sms": "I'll send an SMS to {to_number}. Should I proceed?"
+            }
         }
         
-        template = templates.get(tool_action.tool_type, "Should I proceed with this action?")
+        tool_templates = templates.get(tool_action.tool_type, {})
+        template = tool_templates.get(tool_action.action, "Should I proceed with this action?")
         
         try:
             return template.format(**tool_action.parameters)
         except KeyError:
             return "Should I proceed with this action?"
+

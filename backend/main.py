@@ -11,7 +11,9 @@ from models.schema import (
     AgentResponse,
     HealthResponse,
     ConversationState,
-    ConversationStatus
+    ConversationStatus,
+    ToolType,
+    ToolAction
 )
 from db.mongo_client import MongoDBClient, mongodb_client
 from utils.config import get_settings
@@ -288,15 +290,255 @@ async def execute_tool_action(tool_action):
     Returns:
         Execution result
     """
-    # This is a placeholder - implement actual tool execution
-    # based on tool_type and action
-    
     logger.info(f"Executing tool action: {tool_action.tool_type} - {tool_action.action}")
     
-    # Example implementation would initialize the appropriate tool
-    # and call the corresponding method with parameters
+    try:
+        # Initialize Google Auth Handler
+        auth_handler = GoogleAuthHandler(
+            credentials_file=settings.google_credentials_file,
+            token_file=settings.google_token_file
+        )
+        
+        # Execute based on tool type
+        if tool_action.tool_type == ToolType.GMAIL:
+            gmail_tool = GmailTool(auth_handler)
+            return await execute_gmail_action(gmail_tool, tool_action)
+        
+        elif tool_action.tool_type == ToolType.CALENDAR:
+            calendar_tool = CalendarTool(auth_handler)
+            return await execute_calendar_action(calendar_tool, tool_action)
+        
+        elif tool_action.tool_type == ToolType.DOCS:
+            docs_tool = DocsTool(auth_handler)
+            return await execute_docs_action(docs_tool, tool_action)
+        
+        elif tool_action.tool_type == ToolType.SLACK:
+            slack_tool = SlackTool(settings.slack_bot_token)
+            return await execute_slack_action(slack_tool, tool_action)
+        
+        elif tool_action.tool_type == ToolType.SMS:
+            sms_tool = SMSTool(
+                account_sid=settings.twilio_account_sid,
+                auth_token=settings.twilio_auth_token,
+                from_number=settings.twilio_phone_number
+            )
+            return await execute_sms_action(sms_tool, tool_action)
+        
+        else:
+            raise ValueError(f"Unknown tool type: {tool_action.tool_type}")
     
-    return f"Executed {tool_action.action} with {tool_action.tool_type}"
+    except Exception as e:
+        logger.error(f"Failed to execute tool action: {e}")
+        raise
+
+
+async def execute_gmail_action(gmail_tool: GmailTool, tool_action: ToolAction) -> str:
+    """Execute Gmail-specific actions."""
+    action = tool_action.action
+    params = tool_action.parameters
+    
+    if action == "send_email":
+        result = gmail_tool.send_email(
+            to=params.get("to"),
+            subject=params.get("subject"),
+            body=params.get("body"),
+            cc=params.get("cc"),
+            bcc=params.get("bcc"),
+            attachments=params.get("attachments")
+        )
+        return f"Email sent successfully to {params.get('to')}. Message ID: {result['id']}"
+    
+    elif action == "list_messages":
+        max_results = params.get("max_results", 10)
+        query = params.get("query")
+        messages = gmail_tool.list_messages(max_results=max_results, query=query)
+        
+        if not messages:
+            return "No messages found."
+        
+        # Get full details for each message
+        detailed_messages = []
+        for msg in messages[:5]:  # Limit to 5 for brevity
+            full_msg = gmail_tool.get_message(msg['id'])
+            parsed = gmail_tool.parse_message(full_msg)
+            detailed_messages.append(f"From: {parsed.get('from', 'Unknown')}\nSubject: {parsed.get('subject', 'No subject')}\nSnippet: {parsed.get('snippet', '')}")
+        
+        return f"Found {len(messages)} messages. Here are the most recent:\n\n" + "\n---\n".join(detailed_messages)
+    
+    elif action == "search_messages":
+        query = params.get("query", "")
+        max_results = params.get("max_results", 10)
+        messages = gmail_tool.search_messages(query=query, max_results=max_results)
+        
+        if not messages:
+            return f"No messages found matching '{query}'."
+        
+        summaries = [f"From: {m.get('from', 'Unknown')}\nSubject: {m.get('subject', 'No subject')}" for m in messages[:5]]
+        return f"Found {len(messages)} messages matching '{query}':\n\n" + "\n---\n".join(summaries)
+    
+    elif action == "get_unread_messages":
+        max_results = params.get("max_results", 10)
+        messages = gmail_tool.get_unread_messages(max_results=max_results)
+        
+        if not messages:
+            return "No unread messages."
+        
+        summaries = [f"From: {m.get('from', 'Unknown')}\nSubject: {m.get('subject', 'No subject')}" for m in messages[:5]]
+        return f"You have {len(messages)} unread messages:\n\n" + "\n---\n".join(summaries)
+    
+    else:
+        raise ValueError(f"Unknown Gmail action: {action}")
+
+
+async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: ToolAction) -> str:
+    """Execute Calendar-specific actions."""
+    action = tool_action.action
+    params = tool_action.parameters
+    
+    if action == "create_event":
+        from datetime import datetime
+        
+        # Parse datetime strings if needed
+        start_time = params.get("start_time")
+        end_time = params.get("end_time")
+        
+        if isinstance(start_time, str):
+            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        if isinstance(end_time, str):
+            end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        
+        result = calendar_tool.create_event(
+            summary=params.get("summary"),
+            start_time=start_time,
+            end_time=end_time,
+            description=params.get("description"),
+            location=params.get("location"),
+            attendees=params.get("attendees")
+        )
+        return f"Calendar event '{params.get('summary')}' created successfully. Event ID: {result['id']}"
+    
+    elif action == "search_events":
+        from datetime import datetime
+        
+        start_date = params.get("start_date")
+        end_date = params.get("end_date")
+        query = params.get("query")
+        max_results = params.get("max_results", 10)
+        
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        if isinstance(end_date, str):
+            end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        
+        events = calendar_tool.search_events(
+            start_date=start_date,
+            end_date=end_date,
+            query=query,
+            max_results=max_results
+        )
+        
+        if not events:
+            return "No events found."
+        
+        summaries = [f"{e.get('summary', 'No title')} - {e.get('start', {}).get('dateTime', 'No time')}" for e in events]
+        return f"Found {len(events)} events:\n" + "\n".join(summaries)
+    
+    elif action == "get_events_today":
+        events = calendar_tool.get_events_today()
+        
+        if not events:
+            return "No events scheduled for today."
+        
+        summaries = [f"{e.get('summary', 'No title')} - {e.get('start', {}).get('dateTime', 'No time')}" for e in events]
+        return f"Today's events ({len(events)}):\n" + "\n".join(summaries)
+    
+    elif action == "get_events_this_week":
+        events = calendar_tool.get_events_this_week()
+        
+        if not events:
+            return "No events scheduled for this week."
+        
+        summaries = [f"{e.get('summary', 'No title')} - {e.get('start', {}).get('dateTime', 'No time')}" for e in events]
+        return f"This week's events ({len(events)}):\n" + "\n".join(summaries)
+    
+    elif action == "update_event":
+        from datetime import datetime
+        
+        event_id = params.get("event_id")
+        start_time = params.get("start_time")
+        end_time = params.get("end_time")
+        
+        if isinstance(start_time, str):
+            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        if isinstance(end_time, str):
+            end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        
+        result = calendar_tool.update_event(
+            event_id=event_id,
+            summary=params.get("summary"),
+            start_time=start_time,
+            end_time=end_time,
+            description=params.get("description"),
+            location=params.get("location")
+        )
+        return f"Calendar event updated successfully. Event ID: {event_id}"
+    
+    elif action == "delete_event":
+        event_id = params.get("event_id")
+        calendar_tool.delete_event(event_id)
+        return f"Calendar event deleted successfully. Event ID: {event_id}"
+    
+    else:
+        raise ValueError(f"Unknown Calendar action: {action}")
+
+
+async def execute_docs_action(docs_tool: DocsTool, tool_action: ToolAction) -> str:
+    """Execute Docs-specific actions."""
+    action = tool_action.action
+    params = tool_action.parameters
+    
+    if action == "create_document":
+        result = docs_tool.create_document(
+            title=params.get("title"),
+            content=params.get("content")
+        )
+        return f"Document '{params.get('title')}' created successfully. Document ID: {result.get('documentId')}"
+    
+    else:
+        raise ValueError(f"Unknown Docs action: {action}")
+
+
+async def execute_slack_action(slack_tool: SlackTool, tool_action: ToolAction) -> str:
+    """Execute Slack-specific actions."""
+    action = tool_action.action
+    params = tool_action.parameters
+    
+    if action == "send_message":
+        result = slack_tool.send_message(
+            channel=params.get("channel"),
+            message=params.get("message")
+        )
+        return f"Slack message sent successfully to {params.get('channel')}"
+    
+    else:
+        raise ValueError(f"Unknown Slack action: {action}")
+
+
+async def execute_sms_action(sms_tool: SMSTool, tool_action: ToolAction) -> str:
+    """Execute SMS-specific actions."""
+    action = tool_action.action
+    params = tool_action.parameters
+    
+    if action == "send_sms":
+        result = sms_tool.send_sms(
+            to_number=params.get("to_number"),
+            message=params.get("message")
+        )
+        return f"SMS sent successfully to {params.get('to_number')}"
+    
+    else:
+        raise ValueError(f"Unknown SMS action: {action}")
+
 
 
 if __name__ == "__main__":
