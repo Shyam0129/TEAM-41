@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     
     # Gemini AI
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-pro"
+    gemini_model: str = "gemini-1.5-pro"
     
     # Slack
     slack_bot_token: Optional[str] = None
