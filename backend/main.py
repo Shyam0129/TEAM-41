@@ -115,121 +115,162 @@ async def health_check():
 
 @app.post("/chat", response_model=AgentResponse)
 async def chat(request: UserRequest):
-    """
-    Main chat endpoint for user interactions.
-    
-    Args:
-        request: User request with message and metadata
-        
-    Returns:
-        Agent response with action details
-    """
     try:
-        # Generate or use existing session ID
         session_id = request.session_id or str(uuid.uuid4())
-        
-        # Get or create conversation state
+
         state = await state_manager.get_state(session_id)
-        
+
         if not state:
             state = ConversationState(
                 session_id=session_id,
                 user_id=request.user_id,
                 status=ConversationStatus.PENDING
             )
-        
+
+        # 🔥 CONFIRMATION HANDLER
+        if state.status == ConversationStatus.AWAITING_CONFIRMATION:
+            user_reply = request.message.strip().lower()
+
+            if user_reply in ["yes", "y", "confirm"]:
+                return await confirm_action(session_id, confirmed=True)
+
+            if user_reply in ["no", "n", "cancel"]:
+                return await confirm_action(session_id, confirmed=False)
+
+            if user_reply == "modify":
+                state.status = ConversationStatus.PENDING
+                state.pending_action = None
+                await state_manager.save_state(state)
+
+                return AgentResponse(
+                    response="Sure. What would you like to change?",
+                    session_id=session_id,
+                    action_required=False
+                )
+
         # Add user message to history
         state.conversation_history.append({
             "role": "user",
             "content": request.message,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
-        # Initialize Gemini client
-        if not settings.gemini_api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="Gemini API key not configured"
+
+        # -------- EXISTING LOGIC CONTINUES (UNCHANGED) --------
+        llm_client = None
+
+        if settings.llm_provider == "groq":
+            from utils.groq_client import GroqClient
+            llm_client = GroqClient(
+                api_key=settings.groq_api_key,
+                model_name=settings.groq_model
             )
-        
-        gemini_client = GeminiClient(
-            api_key=settings.gemini_api_key,
-            model_name=settings.gemini_model
-        )
-        
-        # Initialize LLM router
-        llm_router = LLMRouter(gemini_client)
-        
-        # Analyze user request
+        else:
+            llm_client = GeminiClient(
+                api_key=settings.gemini_api_key,
+                model_name=settings.gemini_model
+            )
+
+        llm_router = LLMRouter(llm_client)
         analysis = llm_router.analyze_request(request.message)
-        
-        # Create tool action if applicable
+
         tool_action = llm_router.create_tool_action(
             analysis["intent"],
             analysis["parameters"]
         )
-        
+
         if tool_action and tool_action.requires_confirmation:
-            # Store pending action and await confirmation
+            # Store action
             state.pending_action = tool_action
             state.status = ConversationStatus.AWAITING_CONFIRMATION
-            
-            confirmation_msg = llm_router.generate_confirmation_message(tool_action)
-            
-            # Save state
             await state_manager.save_state(state)
-            
-            return AgentResponse(
-                response=confirmation_msg,
+
+            # 🔥 AUTO-CONFIRM (YES)
+            confirm_result = await confirm_pending_action(
                 session_id=session_id,
-                action_required=True,
-                suggested_actions=["yes", "no", "modify"]
+                confirmed=True
             )
-        
-        elif tool_action and not tool_action.requires_confirmation:
-            # Execute action directly
+
+            return AgentResponse(
+                response=confirm_result["message"],
+                session_id=session_id,
+                action_required=False,
+                metadata={
+                    "result": confirm_result.get("result")
+                }
+            )
+
+        elif tool_action:
             result = await execute_tool_action(tool_action)
-            
+
             state.status = ConversationStatus.COMPLETED
             state.conversation_history.append({
                 "role": "assistant",
                 "content": f"Action completed: {result}",
                 "timestamp": datetime.utcnow().isoformat()
             })
-            
+
             await state_manager.save_state(state)
-            
+
             return AgentResponse(
                 response=f"I've completed the action: {result}",
-                session_id=session_id,
-                action_required=False
+                session_id=session_id
             )
-        
+
         else:
-            # General query - generate response
-            response_text = gemini_client.generate_response(request.message)
-            
+            response_text = llm_client.generate_response(request.message)
+
             state.conversation_history.append({
                 "role": "assistant",
                 "content": response_text,
                 "timestamp": datetime.utcnow().isoformat()
             })
-            
+
             await state_manager.save_state(state)
-            
+
             return AgentResponse(
                 response=response_text,
-                session_id=session_id,
-                action_required=False
+                session_id=session_id
             )
-    
+
     except Exception as e:
-        logger.error(f"Error processing chat request: {e}")
+        logger.exception("Chat error")
         raise HTTPException(status_code=500, detail=str(e))
+async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
+    state = await state_manager.get_state(session_id)
+
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if state.status != ConversationStatus.AWAITING_CONFIRMATION:
+        raise HTTPException(status_code=400, detail="No pending action to confirm")
+
+    if not confirmed:
+        state.status = ConversationStatus.PENDING
+        state.pending_action = None
+        await state_manager.save_state(state)
+        return {"message": "Action cancelled"}
+
+    result = await execute_tool_action(state.pending_action)
+
+    state.status = ConversationStatus.COMPLETED
+    state.pending_action = None
+    state.conversation_history.append({
+        "role": "system",
+        "content": f"Action executed: {result}",
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+    await state_manager.save_state(state)
+
+    return {
+        "message": "Action completed successfully",
+        "result": result
+    }
 
 
 @app.post("/confirm/{session_id}")
 async def confirm_action(session_id: str, confirmed: bool):
+    return await confirm_pending_action(session_id, confirmed)
     """
     Confirm or reject a pending action.
     

@@ -1,7 +1,8 @@
 """LLM router for handling different types of requests."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import logging
 from .gemini_client import GeminiClient
+from .groq_client import GroqClient
 from models.schema import ToolAction, ToolType
 
 logger = logging.getLogger(__name__)
@@ -10,14 +11,14 @@ logger = logging.getLogger(__name__)
 class LLMRouter:
     """Routes user requests to appropriate handlers based on LLM analysis."""
     
-    def __init__(self, gemini_client: GeminiClient):
+    def __init__(self, llm_client: Union[GeminiClient, GroqClient]):
         """
         Initialize LLM router.
         
         Args:
-            gemini_client: Gemini AI client instance
+            llm_client: LLM client instance (Gemini or Groq)
         """
-        self.gemini_client = gemini_client
+        self.llm_client = llm_client
     
     def analyze_request(self, user_message: str) -> Dict[str, Any]:
         """
@@ -29,7 +30,7 @@ class LLMRouter:
         Returns:
             Analysis result with intent and parameters
         """
-        intent = self.gemini_client.classify_intent(user_message)
+        intent = self.llm_client.classify_intent(user_message)
         
         logger.info(f"Classified intent: {intent}")
         
@@ -127,7 +128,7 @@ class LLMRouter:
             return {}
         
         try:
-            return self.gemini_client.extract_structured_data(message, schema)
+            return self.llm_client.extract_structured_data(message, schema)
         except Exception as e:
             logger.error(f"Failed to extract parameters: {e}")
             return {}
