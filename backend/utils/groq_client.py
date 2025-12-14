@@ -201,3 +201,247 @@ Return ONLY the intent name, nothing else."""
         except Exception as e:
             logger.error(f"Failed to classify intent: {e}")
             return "general_query"
+    
+    def generate_email(
+        self,
+        recipient: str,
+        purpose: str,
+        context: Optional[str] = None,
+        tone: str = "professional"
+    ) -> Dict[str, str]:
+        """
+        Generate a brief, professional email with subject and body.
+        
+        Args:
+            recipient: Email recipient (name or email)
+            purpose: Purpose of the email
+            context: Additional context for the email
+            tone: Email tone (professional, casual, formal)
+            
+        Returns:
+            Dictionary with 'subject' and 'body' keys
+        """
+        try:
+            context_str = f"\nAdditional context: {context}" if context else ""
+            
+            prompt = f"""Generate a brief, professional email with the following details:
+
+Recipient: {recipient}
+Purpose: {purpose}{context_str}
+Tone: {tone}
+
+Requirements:
+1. Create a clear, concise subject line (max 10 words)
+2. Write a brief email body (2-4 paragraphs maximum)
+3. Use professional language and proper email etiquette
+4. Include appropriate greeting and closing
+5. Keep it concise and to the point, like ChatGPT would write
+
+Return the email in this EXACT JSON format:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here with proper formatting"
+}}
+
+Return ONLY the JSON, no other text."""
+
+            response = self.generate_response(prompt, temperature=0.7)
+            
+            # Parse JSON response
+            try:
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start != -1 and end > start:
+                    json_str = response[start:end]
+                    email_data = json.loads(json_str)
+                    return {
+                        "subject": email_data.get("subject", "No Subject"),
+                        "body": email_data.get("body", "")
+                    }
+                else:
+                    logger.error("No JSON found in email generation response")
+                    return {
+                        "subject": "No Subject",
+                        "body": purpose
+                    }
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse email JSON: {e}")
+                return {
+                    "subject": "No Subject",
+                    "body": purpose
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to generate email: {e}")
+            return {
+                "subject": "No Subject",
+                "body": purpose
+            }
+    
+    def parse_datetime(
+        self,
+        text: str,
+        reference_time: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        Parse natural language date/time into structured format.
+        
+        Args:
+            text: Natural language date/time (e.g., "tomorrow at 2pm", "next Monday 10am")
+            reference_time: Reference datetime for relative dates (ISO format)
+            
+        Returns:
+            Dictionary with 'start_time' and 'end_time' in ISO format
+        """
+        try:
+            from datetime import datetime, timedelta
+            import re
+            
+            now = datetime.now() if not reference_time else datetime.fromisoformat(reference_time)
+            
+            prompt = f"""Parse the following date/time expression into a structured format.
+
+Current date/time: {now.strftime('%Y-%m-%d %H:%M:%S')}
+Expression: {text}
+
+Rules:
+1. If only start time is mentioned, assume 1 hour duration
+2. Handle relative dates (tomorrow, next week, etc.)
+3. Handle time formats (2pm, 14:00, etc.)
+4. Return times in ISO 8601 format
+
+Return ONLY this JSON format:
+{{
+    "start_time": "YYYY-MM-DDTHH:MM:SS",
+    "end_time": "YYYY-MM-DDTHH:MM:SS"
+}}
+
+Return ONLY the JSON, no other text."""
+
+            response = self.generate_response(prompt, temperature=0.3)
+            
+            # Parse JSON response
+            try:
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start != -1 and end > start:
+                    json_str = response[start:end]
+                    datetime_data = json.loads(json_str)
+                    return {
+                        "start_time": datetime_data.get("start_time", ""),
+                        "end_time": datetime_data.get("end_time", "")
+                    }
+                else:
+                    # Fallback: default to 1 hour from now
+                    start_time = now + timedelta(hours=1)
+                    end_time = start_time + timedelta(hours=1)
+                    return {
+                        "start_time": start_time.isoformat(),
+                        "end_time": end_time.isoformat()
+                    }
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse datetime JSON: {e}")
+                # Fallback
+                start_time = now + timedelta(hours=1)
+                end_time = start_time + timedelta(hours=1)
+                return {
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to parse datetime: {e}")
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            start_time = now + timedelta(hours=1)
+            end_time = start_time + timedelta(hours=1)
+            return {
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat()
+            }
+    
+    def generate_document_content(
+        self,
+        topic: str,
+        document_type: str = "general",
+        length: str = "detailed"
+    ) -> Dict[str, str]:
+        """
+        Generate detailed, well-structured content for a document.
+        
+        Args:
+            topic: Topic or subject of the document
+            document_type: Type of document (report, guide, article, etc.)
+            length: Length preference (brief, detailed, comprehensive)
+            
+        Returns:
+            Dictionary with 'title' and 'content' keys
+        """
+        try:
+            length_instructions = {
+                "brief": "2-3 pages, concise and to the point",
+                "detailed": "5-7 pages, comprehensive coverage",
+                "comprehensive": "10+ pages, in-depth analysis"
+            }
+            
+            length_instruction = length_instructions.get(length, length_instructions["detailed"])
+            
+            prompt = f"""Generate a professional, well-structured document about: {topic}
+
+Document Type: {document_type}
+Length: {length_instruction}
+
+Requirements:
+1. Create a clear, professional title
+2. Structure the content with multiple sections using ## for section headers
+3. Include:
+   - Introduction/Overview
+   - Main content divided into logical sections
+   - Key points and important information
+   - Practical examples or applications (if relevant)
+   - Conclusion or summary
+4. Use professional language
+5. Make it informative, accurate, and engaging
+6. Include bullet points where appropriate
+7. Ensure the content is detailed and comprehensive
+
+Format the response as JSON:
+{{
+    "title": "Professional Document Title",
+    "content": "## Introduction\\n\\nIntroduction text here...\\n\\n## Section 1\\n\\nContent here...\\n\\n## Section 2\\n\\nMore content..."
+}}
+
+Generate ONLY the JSON, no other text."""
+
+            response = self.generate_response(prompt, temperature=0.7, max_tokens=4000)
+            
+            # Parse JSON response
+            try:
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start != -1 and end > start:
+                    json_str = response[start:end]
+                    doc_data = json.loads(json_str)
+                    return {
+                        "title": doc_data.get("title", topic),
+                        "content": doc_data.get("content", "")
+                    }
+                else:
+                    logger.error("No JSON found in document generation response")
+                    return {
+                        "title": topic,
+                        "content": response
+                    }
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse document JSON: {e}")
+                return {
+                    "title": topic,
+                    "content": response
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to generate document content: {e}")
+            return {
+                "title": topic,
+                "content": f"Failed to generate content for: {topic}"
+            }

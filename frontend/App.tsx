@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { InputArea } from './components/InputArea.tsx';
 import { ToolsModal } from './components/ToolsModal.tsx';
+import { MessageContent } from './components/MessageContent.tsx';
 import { Message, ModelType } from './types.ts';
 import { INITIAL_SUGGESTIONS } from './constants.tsx';
 import { streamChatResponse } from './services/backendService.ts';
@@ -409,7 +410,7 @@ export default function App() {
                        `}
                     >
                       <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <div className="whitespace-pre-wrap font-light">{msg.content}</div>
+                        <MessageContent content={msg.content} />
                       </div>
                     </div>
                   )}

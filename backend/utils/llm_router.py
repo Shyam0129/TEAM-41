@@ -109,8 +109,10 @@ class LLMRouter:
             
             # Other tools
             "create_document": {
-                "title": "document title",
-                "content": "document content"
+                "topic": "topic or subject of the document",
+                "title": "document title (optional)",
+                "format": "pdf or docx (default: pdf)",
+                "document_type": "type like report, guide, article (optional)"
             },
             "send_slack_message": {
                 "channel": "channel name or ID",
@@ -128,7 +130,20 @@ class LLMRouter:
             return {}
         
         try:
-            return self.llm_client.extract_structured_data(message, schema)
+            params = self.llm_client.extract_structured_data(message, schema)
+            
+            # Special handling for calendar events - parse natural language dates
+            if intent == "create_calendar_event" and params:
+                # If we have start_time as natural language, parse it
+                if params.get("start_time") and params.get("end_time"):
+                    # Check if they're already in ISO format
+                    if not params["start_time"].count('T'):
+                        # Parse natural language datetime
+                        datetime_info = self.llm_client.parse_datetime(message)
+                        params["start_time"] = datetime_info.get("start_time", params["start_time"])
+                        params["end_time"] = datetime_info.get("end_time", params["end_time"])
+            
+            return params
         except Exception as e:
             logger.error(f"Failed to extract parameters: {e}")
             return {}

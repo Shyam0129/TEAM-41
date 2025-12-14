@@ -113,6 +113,42 @@ async def health_check():
     )
 
 
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    """Download generated PDF/Doc files."""
+    from fastapi.responses import FileResponse
+    from tools.pdf_tool import PDFDocTool
+    import os
+    
+    try:
+        pdf_tool = PDFDocTool()
+        filepath = pdf_tool.get_file(filename)
+        
+        # Determine content type
+        if filename.endswith('.pdf'):
+            media_type = 'application/pdf'
+        elif filename.endswith('.docx'):
+            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            media_type = 'application/octet-stream'
+        
+        return FileResponse(
+            path=filepath,
+            media_type=media_type,
+            filename=filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except FileNotFoundError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        from fastapi import HTTPException
+        logger.error(f"Error downloading file: {e}")
+        raise HTTPException(status_code=500, detail="Error downloading file")
+
+
 @app.post("/chat", response_model=AgentResponse)
 async def chat(request: UserRequest):
     try:
@@ -131,6 +167,61 @@ async def chat(request: UserRequest):
         if state.status == ConversationStatus.AWAITING_CONFIRMATION:
             user_reply = request.message.strip().lower()
 
+            # Handle email-specific commands
+            if state.pending_action and state.pending_action.tool_type == ToolType.GMAIL:
+                if user_reply in ["send", "s"]:
+                    # Send email immediately
+                    result = await execute_tool_action(state.pending_action)
+                    
+                    state.status = ConversationStatus.COMPLETED
+                    state.pending_action = None
+                    await state_manager.save_state(state)
+                    
+                    return AgentResponse(
+                        response=f"✅ Email sent successfully!\n\n{result}",
+                        session_id=session_id,
+                        action_required=False
+                    )
+                
+                elif user_reply in ["draft", "d"]:
+                    # Save as draft
+                    auth_handler = GoogleAuthHandler(
+                        credentials_file=settings.google_credentials_file,
+                        token_file=settings.google_token_file
+                    )
+                    gmail_tool = GmailTool(auth_handler)
+                    
+                    params = state.pending_action.parameters
+                    draft = gmail_tool.create_draft(
+                        to=params.get("to"),
+                        subject=params.get("subject"),
+                        body=params.get("body"),
+                        cc=params.get("cc"),
+                        bcc=params.get("bcc")
+                    )
+                    
+                    state.status = ConversationStatus.COMPLETED
+                    state.pending_action = None
+                    await state_manager.save_state(state)
+                    
+                    return AgentResponse(
+                        response=f"✅ Email saved as draft in Gmail!\n\nDraft ID: {draft['id']}\n\nYou can find it in your Gmail drafts folder.",
+                        session_id=session_id,
+                        action_required=False
+                    )
+                
+                elif user_reply in ["modify", "m", "edit"]:
+                    state.status = ConversationStatus.PENDING
+                    state.pending_action = None
+                    await state_manager.save_state(state)
+                    
+                    return AgentResponse(
+                        response="Sure! Please tell me what you'd like to change in the email.",
+                        session_id=session_id,
+                        action_required=False
+                    )
+
+            # Handle standard yes/no confirmations for other actions
             if user_reply in ["yes", "y", "confirm"]:
                 return await confirm_action(session_id, confirmed=True)
 
@@ -171,6 +262,46 @@ async def chat(request: UserRequest):
             )
 
         llm_router = LLMRouter(llm_client)
+        
+        # Multi-tool handling
+        from utils.multi_tool_handler import MultiToolHandler
+        multi_handler = MultiToolHandler(llm_client)
+        multi_analysis = multi_handler.analyze_request(request.message)
+        
+        if multi_analysis.get("is_multi_tool"):
+            tasks = multi_analysis["tasks"]
+            results = []
+            
+            logger.info(f"Multi-tool request detected: {len(tasks)} tasks")
+            
+            for task in sorted(tasks, key=lambda x: x["order"]):
+                intent = multi_handler.map_tool_to_intent(task["tool"])
+                tool_action = llm_router.create_tool_action(intent, task["parameters"])
+                
+                if tool_action:
+                    result = await execute_tool_action(tool_action)
+                    results.append(f"✅ {task['description']}\n{result}")
+                    logger.info(f"Completed task: {task['description']}")
+            
+            combined = f"""🎯 **Multi-Task Execution Complete!**
+
+{multi_analysis.get('summary', 'Multiple tasks completed successfully.')}
+
+**Results:**
+
+""" + "\n\n---\n\n".join(results)
+            
+            state.status = ConversationStatus.COMPLETED
+            state.conversation_history.append({
+                "role": "assistant",
+                "content": combined,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            await state_manager.save_state(state)
+            
+            return AgentResponse(response=combined, session_id=session_id, action_required=False)
+        
+        # Single tool handling
         analysis = llm_router.analyze_request(request.message)
 
         tool_action = llm_router.create_tool_action(
@@ -179,25 +310,72 @@ async def chat(request: UserRequest):
         )
 
         if tool_action and tool_action.requires_confirmation:
-            # Store action
-            state.pending_action = tool_action
-            state.status = ConversationStatus.AWAITING_CONFIRMATION
-            await state_manager.save_state(state)
+            # Special handling for send_email - generate brief email first
+            if tool_action.tool_type == ToolType.GMAIL and tool_action.action == "send_email":
+                # Generate brief, professional email
+                recipient = tool_action.parameters.get("to", "")
+                purpose = tool_action.parameters.get("body", request.message)
+                
+                # Use LLM to generate professional email
+                email_content = llm_client.generate_email(
+                    recipient=recipient,
+                    purpose=purpose,
+                    context=request.message
+                )
+                
+                # Update parameters with generated content
+                tool_action.parameters["subject"] = email_content["subject"]
+                tool_action.parameters["body"] = email_content["body"]
+                
+                # Store action with generated email
+                state.pending_action = tool_action
+                state.status = ConversationStatus.AWAITING_CONFIRMATION
+                await state_manager.save_state(state)
+                
+                # Show draft preview with options
+                preview_message = f"""📧 **Email Draft Preview**
 
-            # 🔥 AUTO-CONFIRM (YES)
-            confirm_result = await confirm_pending_action(
-                session_id=session_id,
-                confirmed=True
-            )
+**To:** {recipient}
+**Subject:** {email_content['subject']}
 
-            return AgentResponse(
-                response=confirm_result["message"],
-                session_id=session_id,
-                action_required=False,
-                metadata={
-                    "result": confirm_result.get("result")
-                }
-            )
+**Body:**
+{email_content['body']}
+
+---
+
+Would you like to:
+• Type "send" to send this email now
+• Type "draft" to save as draft in Gmail
+• Type "modify" to make changes"""
+                
+                return AgentResponse(
+                    response=preview_message,
+                    session_id=session_id,
+                    action_required=True,
+                    suggested_actions=["send", "draft", "modify"],
+                    metadata={
+                        "email_preview": {
+                            "to": recipient,
+                            "subject": email_content["subject"],
+                            "body": email_content["body"]
+                        }
+                    }
+                )
+            
+            # For other actions, use standard confirmation
+            else:
+                state.pending_action = tool_action
+                state.status = ConversationStatus.AWAITING_CONFIRMATION
+                await state_manager.save_state(state)
+                
+                confirmation_msg = llm_router.generate_confirmation_message(tool_action)
+                
+                return AgentResponse(
+                    response=confirmation_msg,
+                    session_id=session_id,
+                    action_required=True,
+                    suggested_actions=["yes", "no"]
+                )
 
         elif tool_action:
             result = await execute_tool_action(tool_action)
@@ -248,7 +426,11 @@ async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
         state.status = ConversationStatus.PENDING
         state.pending_action = None
         await state_manager.save_state(state)
-        return {"message": "Action cancelled"}
+        return AgentResponse(
+            response="Action cancelled",
+            session_id=session_id,
+            action_required=False
+        )
 
     result = await execute_tool_action(state.pending_action)
 
@@ -262,10 +444,11 @@ async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
 
     await state_manager.save_state(state)
 
-    return {
-        "message": "Action completed successfully",
-        "result": result
-    }
+    return AgentResponse(
+        response=result,
+        session_id=session_id,
+        action_required=False
+    )
 
 
 @app.post("/confirm/{session_id}")
@@ -437,16 +620,37 @@ async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: Tool
     params = tool_action.parameters
     
     if action == "create_event":
-        from datetime import datetime
+        from datetime import datetime, timedelta
+        from utils.datetime_parser import parse_natural_datetime
         
         # Parse datetime strings if needed
         start_time = params.get("start_time")
         end_time = params.get("end_time")
         
         if isinstance(start_time, str):
-            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-        if isinstance(end_time, str):
-            end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            # Check if it's already in ISO format
+            if 'T' in start_time and start_time.count('-') >= 2:
+                # ISO format
+                try:
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    if isinstance(end_time, str) and 'T' in end_time:
+                        end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                    else:
+                        end_time = start_time + timedelta(hours=1)
+                except ValueError:
+                    # Parse as natural language
+                    parsed = parse_natural_datetime(f"{start_time} {end_time if end_time else ''}")
+                    start_time = parsed["start_time"]
+                    end_time = parsed["end_time"]
+            else:
+                # Natural language - parse it
+                parsed = parse_natural_datetime(f"{start_time} {end_time if end_time else ''}")
+                start_time = parsed["start_time"]
+                end_time = parsed["end_time"]
+        
+        if isinstance(end_time, str) and isinstance(start_time, datetime):
+            # end_time still needs parsing - use start_time + 1 hour
+            end_time = start_time + timedelta(hours=1)
         
         result = calendar_tool.create_event(
             summary=params.get("summary"),
@@ -456,7 +660,26 @@ async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: Tool
             location=params.get("location"),
             attendees=params.get("attendees")
         )
-        return f"Calendar event '{params.get('summary')}' created successfully. Event ID: {result['id']}"
+        
+        # Format times for display
+        start_formatted = start_time.strftime("%B %d, %Y at %I:%M %p")
+        end_formatted = end_time.strftime("%I:%M %p")
+        event_link = result.get('htmlLink', '')
+        
+        completion_msg = f"""✅ **Calendar Event Created Successfully!**
+
+📅 **Event:** {params.get('summary')}
+🕐 **When:** {start_formatted} - {end_formatted}"""
+        
+        if params.get('location'):
+            completion_msg += f"\n📍 **Location:** {params.get('location')}"
+        if params.get('description'):
+            completion_msg += f"\n📝 **Description:** {params.get('description')}"
+        
+        completion_msg += f"\n\n🔗 **View in Google Calendar:** {event_link}"
+        completion_msg += f"\n\n✨ The event has been added to your Google Calendar!"
+        
+        return completion_msg
     
     elif action == "search_events":
         from datetime import datetime
@@ -485,13 +708,29 @@ async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: Tool
         return f"Found {len(events)} events:\n" + "\n".join(summaries)
     
     elif action == "get_events_today":
+        from datetime import datetime
         events = calendar_tool.get_events_today()
         
         if not events:
-            return "No events scheduled for today."
+            return "📅 No events scheduled for today. You're all clear!"
         
-        summaries = [f"{e.get('summary', 'No title')} - {e.get('start', {}).get('dateTime', 'No time')}" for e in events]
-        return f"Today's events ({len(events)}):\n" + "\n".join(summaries)
+        response = f"📅 **Today's Schedule** ({len(events)} event{'s' if len(events) > 1 else ''}):\n\n"
+        
+        for i, e in enumerate(events, 1):
+            start_time = e.get('start', {}).get('dateTime', '')
+            if start_time:
+                dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                time_str = dt.strftime("%I:%M %p")
+            else:
+                time_str = "All day"
+            
+            response += f"{i}. **{e.get('summary', 'No title')}**\n"
+            response += f"   🕐 {time_str}\n"
+            if e.get('location'):
+                response += f"   📍 {e.get('location')}\n"
+            response += "\n"
+        
+        return response.strip()
     
     elif action == "get_events_this_week":
         events = calendar_tool.get_events_this_week()
@@ -534,16 +773,101 @@ async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: Tool
 
 
 async def execute_docs_action(docs_tool: DocsTool, tool_action: ToolAction) -> str:
-    """Execute Docs-specific actions."""
+    """Execute Docs-specific actions - PDF/Doc generation."""
     action = tool_action.action
     params = tool_action.parameters
     
     if action == "create_document":
-        result = docs_tool.create_document(
-            title=params.get("title"),
-            content=params.get("content")
+        from tools.pdf_tool import PDFDocTool
+        from utils.config import get_settings
+        from datetime import datetime
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        settings = get_settings()
+        
+        # Get LLM client for content generation
+        if settings.llm_provider == "groq":
+            from utils.groq_client import GroqClient
+            llm_client = GroqClient(
+                api_key=settings.groq_api_key,
+                model_name=settings.groq_model
+            )
+        else:
+            from utils.gemini_client import GeminiClient
+            llm_client = GeminiClient(
+                api_key=settings.gemini_api_key,
+                model_name=settings.gemini_model
+            )
+        
+        # Get parameters
+        topic = params.get("topic", params.get("title", "Document"))
+        title = params.get("title")
+        doc_format = params.get("format", "pdf").lower()
+        document_type = params.get("document_type", "general")
+        
+        # Generate content using LLM
+        logger.info(f"Generating document content for topic: {topic}")
+        doc_data = llm_client.generate_document_content(
+            topic=topic,
+            document_type=document_type,
+            length="detailed"
         )
-        return f"Document '{params.get('title')}' created successfully. Document ID: {result.get('documentId')}"
+        
+        # Use generated title if not provided
+        if not title:
+            title = doc_data["title"]
+        
+        content = doc_data["content"]
+        
+        # Initialize PDF/Doc tool
+        pdf_tool = PDFDocTool()
+        
+        # Generate document based on format
+        if doc_format == "docx" or doc_format == "doc":
+            result = pdf_tool.generate_docx(
+                title=title,
+                content=content,
+                author="AI Assistant"
+            )
+            format_name = "Word Document"
+        else:
+            result = pdf_tool.generate_pdf(
+                title=title,
+                content=content,
+                author="AI Assistant"
+            )
+            format_name = "PDF"
+        
+        # Create download URL
+        download_url = f"http://{settings.host}:{settings.port}/download/{result['filename']}"
+        
+        # Format file size
+        size_mb = result['size_bytes'] / (1024 * 1024)
+        size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{result['size_bytes'] / 1024:.2f} KB"
+        
+        completion_msg = f"""✅ **{format_name} Created Successfully!**
+
+📄 **Title:** {title}
+📊 **Format:** {format_name}
+📏 **Size:** {size_str}
+📅 **Created:** {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+
+🔗 **Download Your File:**
+
+Click here to download: [{result['filename']}]({download_url})
+
+Or copy this link: {download_url}
+
+✨ Your document is ready with:
+• Comprehensive coverage of the topic
+• Well-structured sections
+• Professional formatting
+• Detailed information and examples
+
+💡 Tip: Right-click the link and select "Save As" to download directly."""
+        
+        return completion_msg
     
     else:
         raise ValueError(f"Unknown Docs action: {action}")
@@ -555,11 +879,20 @@ async def execute_slack_action(slack_tool: SlackTool, tool_action: ToolAction) -
     params = tool_action.parameters
     
     if action == "send_message":
+        channel = params.get("channel", "general")
+        message = params.get("message", "")
+        
         result = slack_tool.send_message(
-            channel=params.get("channel"),
-            message=params.get("message")
+            channel=channel,
+            text=message
         )
-        return f"Slack message sent successfully to {params.get('channel')}"
+        
+        return f"""✅ **Slack Message Sent!**
+
+📢 **Channel:** #{channel}
+💬 **Message:** {message}
+
+✨ Your message has been posted to Slack!"""
     
     else:
         raise ValueError(f"Unknown Slack action: {action}")
