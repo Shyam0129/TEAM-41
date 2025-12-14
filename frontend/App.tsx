@@ -387,9 +387,9 @@ export default function App() {
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
 
           {isWelcomeScreen ? (
-            <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-8 max-w-5xl mx-auto pb-40">
+            <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-8">
               {/* Header */}
-              <div className="text-center mb-16 space-y-4 animate-fade-in-up">
+              <div className="text-center mb-12 space-y-4 animate-fade-in-up">
                 <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-white tracking-tight">
                   Welcome to Rexie.
                 </h1>
@@ -398,116 +398,107 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Suggestions Grid */}
-              <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
-                {INITIAL_SUGGESTIONS.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className={`
-                      group relative p-6 bg-white dark:bg-[#1c1c1e] hover:bg-gray-50 dark:hover:bg-[#2c2c2e] 
-                      border border-gray-200 dark:border-white/5 rounded-xl text-left 
-                      transition-all duration-300 hover:shadow-xl hover:scale-[1.01] shadow-sm
-                      ${(idx === INITIAL_SUGGESTIONS.length - 1 && INITIAL_SUGGESTIONS.length % 2 !== 0) ? 'md:col-span-2' : ''}
-                    `}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-purple-500/5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200 group-hover:text-blue-600 dark:group-hover:text-white relative z-10 flex items-center gap-2">
-                      {suggestion}
-                    </h3>
-                    <div className="absolute top-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity transform group-hover:translate-x-1">
-                      <Zap className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                    </div>
-                  </button>
-                ))}
+              {/* Centered Input Area */}
+              <div className="w-full max-w-3xl px-4">
+                <InputArea
+                  onSend={handleSendMessage}
+                  onStop={handleStopGeneration}
+                  disabled={isLoading}
+                  value={inputValue}
+                  isGenerating={isLoading}
+                />
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-40 space-y-6">
-              {messages.map((msg, idx) => (
-                <div
-                  key={msg.id}
-                  className={`flex gap-4 group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  {msg.role === 'model' && (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-md">
-                      <Zap className="w-4 h-4 text-white" />
-                    </div>
-                  )}
+            <div className="flex justify-center">
+              <div className="w-full max-w-3xl p-4 sm:p-6 pb-56 space-y-6">
+                {messages.map((msg, idx) => (
+                  <div
+                    key={msg.id}
+                    className={`flex gap-4 group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {msg.role === 'model' && (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-md">
+                        <Zap className="w-4 h-4 text-white" />
+                      </div>
+                    )}
 
-                  {msg.role === 'user' ? (
-                    <div className="flex flex-col items-end max-w-[85%]">
-                      <div className="bg-gray-200 dark:bg-[#2c2c2e] text-gray-900 dark:text-white rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm">
-                        {msg.content}
+                    {msg.role === 'user' ? (
+                      <div className="flex flex-col items-end max-w-[85%]">
+                        <div className="bg-gray-200 dark:bg-[#2c2c2e] text-gray-900 dark:text-white rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm">
+                          {msg.content}
+                        </div>
+                        {/* Edit and Retry Options */}
+                        <div className="flex items-center gap-2 mt-1 mr-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <button
+                            onClick={() => handleEdit(msg.content)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
+                            title="Edit"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleRetry(msg.content)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
+                            title="Retry"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      {/* Edit and Retry Options */}
-                      <div className="flex items-center gap-2 mt-1 mr-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                        <button
-                          onClick={() => handleEdit(msg.content)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
-                          title="Edit"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleRetry(msg.content)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
-                          title="Retry"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      className={`
+                    ) : (
+                      <div
+                        className={`
                          max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm
                          bg-white dark:bg-[#1c1c1e] text-gray-800 dark:text-gray-200 border border-gray-100 dark:border-white/5
                          ${msg.isError ? 'border-red-500/50 bg-red-50 dark:bg-red-500/10' : ''}
                        `}
-                    >
-                      <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <MessageContent content={msg.content} />
+                      >
+                        <div className="prose prose-sm max-w-none dark:prose-invert">
+                          <MessageContent content={msg.content} />
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {msg.role === 'user' && (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-1 text-xs font-bold text-white shadow-md">
-                      JD
+                    {msg.role === 'user' && (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-1 text-xs font-bold text-white shadow-md">
+                        JD
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {isLoading && messages[messages.length - 1]?.role === 'user' && (
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 animate-pulse shadow-md">
+                      <Zap className="w-4 h-4 text-white" />
                     </div>
-                  )}
-                </div>
-              ))}
-              {isLoading && messages[messages.length - 1]?.role === 'user' && (
-                <div className="flex gap-4">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 animate-pulse shadow-md">
-                    <Zap className="w-4 h-4 text-white" />
+                    <div className="flex items-center gap-1 mt-3">
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-75"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-150"></div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 mt-3">
-                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-75"></div>
-                    <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-150"></div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
+                )}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
           )}
         </div>
 
-        {/* Bottom Input Area Container - Fixed and Centered */}
-        <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-gray-50 via-gray-50 dark:from-[#0f0f10] dark:via-[#0f0f10] to-transparent pt-10 pb-6 px-4 z-20 transition-colors">
-          <div className="w-full max-w-3xl">
-            <InputArea
-              onSend={handleSendMessage}
-              onStop={handleStopGeneration}
-              disabled={isLoading}
-              value={inputValue}
-              isGenerating={isLoading}
-            />
+        {/* Bottom Input Area Container - Fixed and Centered - Only show when not on welcome screen */}
+        {!isWelcomeScreen && (
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-gray-50 via-gray-50 dark:from-[#0f0f10] dark:via-[#0f0f10] to-transparent pt-12 pb-6 px-4 z-20 transition-colors min-h-[180px]">
+            <div className="w-full max-w-3xl px-4">
+              <InputArea
+                onSend={handleSendMessage}
+                onStop={handleStopGeneration}
+                disabled={isLoading}
+                value={inputValue}
+                isGenerating={isLoading}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>

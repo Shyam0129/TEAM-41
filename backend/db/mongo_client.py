@@ -2,7 +2,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,29 @@ class MongoDBClient:
         if not self.db:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self.db[collection_name]
+    
+    async def insert_one(self, collection_name: str, document: Dict[str, Any]):
+        """Insert a single document into a collection."""
+        collection = self.get_collection(collection_name)
+        result = await collection.insert_one(document)
+        return result.inserted_id
+    
+    async def find_one(self, collection_name: str, query: Dict[str, Any]):
+        """Find a single document in a collection."""
+        collection = self.get_collection(collection_name)
+        return await collection.find_one(query)
+    
+    async def update_one(self, collection_name: str, query: Dict[str, Any], update: Dict[str, Any]):
+        """Update a single document in a collection."""
+        collection = self.get_collection(collection_name)
+        result = await collection.update_one(query, update)
+        return result.modified_count
+    
+    async def delete_one(self, collection_name: str, query: Dict[str, Any]):
+        """Delete a single document from a collection."""
+        collection = self.get_collection(collection_name)
+        result = await collection.delete_one(query)
+        return result.deleted_count
     
     async def health_check(self) -> bool:
         """
