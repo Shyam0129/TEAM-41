@@ -3,9 +3,16 @@ import { Sidebar } from './components/Sidebar.tsx';
 import { InputArea } from './components/InputArea.tsx';
 import { ToolsModal } from './components/ToolsModal.tsx';
 import { MessageContent } from './components/MessageContent.tsx';
+import { ConversationHistory } from './components/ConversationHistory.tsx';
 import { Message, ModelType } from './types.ts';
 import { INITIAL_SUGGESTIONS } from './constants.tsx';
 import { streamChatResponse } from './services/backendService.ts';
+import {
+  createConversation,
+  getConversationMessages,
+  Conversation,
+  ConversationMessage
+} from './services/conversationService.ts';
 import {
   Share,
   Menu,
@@ -35,6 +42,8 @@ export default function App() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [userId] = useState('user_' + Math.random().toString(36).substr(2, 9));
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [conversationTitle, setConversationTitle] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -124,6 +133,20 @@ export default function App() {
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
 
+    // Create conversation if this is the first message
+    if (!currentConversationId && !sessionId) {
+      try {
+        const newSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
+        setSessionId(newSessionId);
+
+        const conversation = await createConversation(userId, newSessionId, text);
+        setCurrentConversationId(conversation.conversation_id);
+        setConversationTitle(conversation.title || null);
+      } catch (error) {
+        console.error('Error creating conversation:', error);
+      }
+    }
+
     // Create a placeholder for the bot response
     const botMsgId = (Date.now() + 1).toString();
     setMessages(prev => [...prev, {
@@ -187,7 +210,32 @@ export default function App() {
     setMessages([]);
     setIsWelcomeScreen(true);
     setInputValue('');
-    setSessionId(null); // Reset session for new chat
+    setSessionId(null);
+    setCurrentConversationId(null);
+    setConversationTitle(null);
+  };
+
+  const handleSelectConversation = async (conversationId: string) => {
+    try {
+      const { messages: convMessages } = await getConversationMessages(conversationId);
+
+      // Convert to Message format
+      const formattedMessages: Message[] = convMessages.map((msg: ConversationMessage) => ({
+        id: msg.id,
+        role: msg.role === 'assistant' ? 'model' : msg.role as 'user' | 'model',
+        content: msg.content,
+        timestamp: new Date(msg.timestamp)
+      }));
+
+      setMessages(formattedMessages);
+      setCurrentConversationId(conversationId);
+      setIsWelcomeScreen(false);
+
+      // Close sidebar on mobile
+      if (window.innerWidth < 768) setIsSidebarOpen(false);
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
   };
 
   const handleSuggestionClick = (text: string) => {
@@ -231,7 +279,16 @@ export default function App() {
         setActiveNav={setActiveNav}
         onNewChat={handleNewChat}
         onPromptSelect={handleSidebarPromptSelect}
-      />
+      >
+        {activeNav === 'chat' && (
+          <ConversationHistory
+            userId={userId}
+            currentConversationId={currentConversationId || undefined}
+            onSelectConversation={handleSelectConversation}
+            onNewConversation={handleNewChat}
+          />
+        )}
+      </Sidebar>
 
       {/* Main Content */}
       <div className={`flex-1 flex flex-col h-full transition-all duration-300 ${isSidebarOpen ? 'md:ml-72' : 'md:ml-0'}`}>
@@ -439,15 +496,17 @@ export default function App() {
           )}
         </div>
 
-        {/* Bottom Input Area Container - Fixed */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-50 via-gray-50 dark:from-[#0f0f10] dark:via-[#0f0f10] to-transparent pt-10 pb-6 px-4 md:px-8 z-20 transition-colors">
-          <InputArea
-            onSend={handleSendMessage}
-            onStop={handleStopGeneration}
-            disabled={isLoading}
-            value={inputValue}
-            isGenerating={isLoading}
-          />
+        {/* Bottom Input Area Container - Fixed and Centered */}
+        <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-gray-50 via-gray-50 dark:from-[#0f0f10] dark:via-[#0f0f10] to-transparent pt-10 pb-6 px-4 z-20 transition-colors">
+          <div className="w-full max-w-3xl">
+            <InputArea
+              onSend={handleSendMessage}
+              onStop={handleStopGeneration}
+              disabled={isLoading}
+              value={inputValue}
+              isGenerating={isLoading}
+            />
+          </div>
         </div>
 
       </div>

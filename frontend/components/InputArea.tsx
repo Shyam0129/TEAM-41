@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Sparkles, Command, Bot, Zap, Star, Square, Mic } from 'lucide-react';
-import { INITIAL_SUGGESTIONS } from '../constants.tsx';
+import { Plus, ArrowUp, Square, Mic, Paperclip, Image as ImageIcon } from 'lucide-react';
 
 interface InputAreaProps {
   onSend: (message: string) => void;
@@ -13,9 +12,9 @@ interface InputAreaProps {
 
 export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, isExpanded = true, value, isGenerating }) => {
   const [input, setInput] = useState('');
-  const [showPrompts, setShowPrompts] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const promptMenuRef = useRef<HTMLDivElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
 
   // Allow external control of input value (for sidebar clicks)
   useEffect(() => {
@@ -28,11 +27,11 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
     }
   }, [value]);
 
-  // Close prompts menu when clicking outside
+  // Close attach menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (promptMenuRef.current && !promptMenuRef.current.contains(event.target as Node)) {
-        setShowPrompts(false);
+      if (attachMenuRef.current && !attachMenuRef.current.contains(event.target as Node)) {
+        setShowAttachMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -46,7 +45,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
     if (!input.trim() || disabled) return;
     onSend(input);
     setInput('');
-    setShowPrompts(false);
+    setShowAttachMenu(false);
   };
 
   const handleStop = (e?: React.MouseEvent) => {
@@ -63,124 +62,92 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
     }
   };
 
-  const handlePromptClick = (prompt: string) => {
-    setInput(prompt);
-    setShowPrompts(false);
-    if (textareaRef.current) {
-        textareaRef.current.focus();
-    }
-  };
-
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [input]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto relative">
-      
-      {/* Prompt Menu Popup */}
-      {showPrompts && (
-        <div ref={promptMenuRef} className="absolute bottom-full left-0 mb-3 w-72 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
-           <div className="px-4 py-3 border-b border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 flex items-center justify-between">
-             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Quick Prompts</span>
-             <Zap className="w-3 h-3 text-blue-500 dark:text-blue-400" />
-           </div>
-           <div className="max-h-64 overflow-y-auto custom-scrollbar p-1">
-             {INITIAL_SUGGESTIONS.map((suggestion, idx) => (
-               <button
-                 key={idx}
-                 onClick={() => handlePromptClick(suggestion)}
-                 className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-blue-600 dark:hover:text-white rounded-lg transition-colors truncate flex items-center gap-2"
-               >
-                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50 flex-shrink-0"></span>
-                 <span className="truncate">{suggestion}</span>
-               </button>
-             ))}
-           </div>
+    <div className="w-full relative">
+
+      {/* Attach Menu Popup */}
+      {showAttachMenu && (
+        <div ref={attachMenuRef} className="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-[#2c2c2e] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
+          <div className="p-1">
+            <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors flex items-center gap-3">
+              <Paperclip className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              <span>Attach file</span>
+            </button>
+            <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors flex items-center gap-3">
+              <ImageIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              <span>Upload image</span>
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="relative bg-white dark:bg-[#1c1c1e] rounded-2xl border border-gray-200 dark:border-white/10 focus-within:border-blue-400 dark:focus-within:border-white/20 transition-all shadow-xl shadow-black/5 dark:shadow-black/20">
-        
-        {/* Robot / Prompts Button */}
-        <div className="absolute left-3 top-3 z-10">
-           <button 
-             onClick={() => setShowPrompts(!showPrompts)}
-             className="relative p-2 bg-blue-50 dark:bg-[#2c2c2e]/50 hover:bg-blue-100 dark:hover:bg-[#3a3a3c] rounded-lg transition-colors group overflow-visible"
-             title="Open AI prompts"
-           >
-             <Bot className={`w-5 h-5 text-blue-500 dark:text-blue-400 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-transform duration-300 ${showPrompts ? 'scale-110' : ''}`} />
-             
-             {/* Animated Thinking Dots */}
-             {!showPrompts && (
-               <div className="absolute -top-0.5 -right-0.5 flex space-x-[1px] bg-white dark:bg-[#1c1c1e] rounded-full px-1 py-0.5 border border-blue-100 dark:border-blue-500/30">
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.2s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.4s' }}></div>
-               </div>
-             )}
+      {/* Main Input Container */}
+      <div className="relative bg-white dark:bg-[#2c2c2e] rounded-3xl border border-gray-200 dark:border-white/10 focus-within:border-gray-300 dark:focus-within:border-white/20 transition-all shadow-sm hover:shadow-md">
 
-             {/* Magical Floating Particles - Decoration */}
-             {!showPrompts && (
-               <>
-                 <Sparkles className="absolute -top-2 -left-2 w-3 h-3 text-yellow-400 animate-pulse opacity-0 group-hover:opacity-100 transition-opacity duration-700 delay-75" style={{ animationDuration: '2s' }} />
-                 <Star className="absolute -bottom-1 -right-2 w-2.5 h-2.5 text-blue-400 animate-float opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-               </>
-             )}
-           </button>
+        {/* Left Side - Plus Button */}
+        <div className="absolute left-4 bottom-4 z-10">
+          <button
+            onClick={() => setShowAttachMenu(!showAttachMenu)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors group"
+            title="Attach files"
+          >
+            <Plus className="w-5 h-5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors" />
+          </button>
         </div>
 
+        {/* Textarea */}
         <textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Rexie anything..."
-          className="w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-base py-4 pr-12 pl-14 rounded-2xl resize-none focus:outline-none min-h-[56px] max-h-[150px] overflow-y-auto scrollbar-hide"
+          placeholder="Message Rexie..."
+          className="w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-[15px] py-4 pr-32 pl-14 rounded-3xl resize-none focus:outline-none min-h-[56px] max-h-[200px] overflow-y-auto custom-scrollbar leading-relaxed"
           rows={1}
           disabled={disabled && !isGenerating}
         />
-        
-        {/* Send / Stop Button */}
-        <button
-          onClick={isGenerating ? handleStop : () => handleSubmit()}
-          disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
-          className={`
-            absolute right-3 top-3 p-1.5 rounded-lg transition-all duration-200
-            ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
-              ? 'bg-blue-600 dark:bg-white text-white dark:text-black hover:bg-blue-700 dark:hover:bg-gray-200 shadow-md' 
-              : 'bg-gray-200 dark:bg-[#2c2c2e] text-gray-400 dark:text-gray-500 cursor-not-allowed'}
-          `}
-        >
-          {isGenerating ? (
-            <Square className="w-4 h-4 fill-current" />
-          ) : (
-            <ArrowUp className="w-4 h-4" />
-          )}
-        </button>
 
-        {/* Footer Actions inside Input */}
-        <div className="flex items-center justify-between px-3 pb-3 pt-1 ml-11">
-          <div className="flex items-center gap-1">
-             {/* Spacer */}
-          </div>
+        {/* Right Side - Action Buttons */}
+        <div className="absolute right-3 bottom-3 flex items-center gap-1">
+          {/* Voice Button */}
+          <button
+            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            title="Voice input"
+          >
+            <Mic className="w-5 h-5" />
+          </button>
 
-          <div className="flex items-center gap-1">
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Attach">
-                <Paperclip className="w-4 h-4" />
-             </button>
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Voice">
-                <Mic className="w-4 h-4" />
-             </button>
-          </div>
+          {/* Send / Stop Button */}
+          <button
+            onClick={isGenerating ? handleStop : () => handleSubmit()}
+            disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
+            className={`
+              p-2.5 rounded-lg transition-all duration-200
+              ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
+                ? 'bg-gray-900 dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-100 shadow-sm'
+                : 'bg-gray-200 dark:bg-[#3a3a3c] text-gray-400 dark:text-gray-600 cursor-not-allowed'}
+            `}
+            title={isGenerating ? "Stop generating" : "Send message"}
+          >
+            {isGenerating ? (
+              <Square className="w-4 h-4 fill-current" />
+            ) : (
+              <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+            )}
+          </button>
         </div>
       </div>
-      
-      <div className="text-center mt-3">
-        <p className="text-[10px] text-gray-400 dark:text-gray-600">
+
+      {/* Footer Text */}
+      <div className="text-center mt-2.5">
+        <p className="text-[11px] text-gray-400 dark:text-gray-600 font-light">
           Rexie can make mistakes. Consider checking important information.
         </p>
       </div>
