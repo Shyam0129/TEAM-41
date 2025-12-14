@@ -76,27 +76,98 @@
 
 ### System Architecture
 
-```
-┌─────────────┐
-│   Frontend  │ (React + TypeScript)
-│   Port 3000 │
-└──────┬──────┘
-       │ HTTP/WebSocket
-       ▼
-┌─────────────┐
-│   Backend   │ (FastAPI + Python)
-│   Port 8000 │
-└──────┬──────┘
-       │
-       ├──► MongoDB (Conversations)
-       ├──► Redis (Sessions)
-       ├──► LLM Router (Groq/Gemini)
-       └──► Tools Layer
-            ├── Gmail Tool
-            ├── Slack Tool
-            ├── Calendar Tool
-            ├── Docs Tool
-            └── SMS Tool
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        U[👤 User]
+        FE["🖥️ Frontend<br/>React + TypeScript<br/><br/>• Real-time chat UI<br/>• Streaming responses<br/>• Tool execution status"]
+    end
+
+    subgraph "Backend Layer"
+        BE["⚙️ Backend Orchestrator<br/>FastAPI + MCP Host<br/><br/>• Session management<br/>• Context storage<br/>• MCP protocol handler<br/>• Request routing"]
+        
+        LLM["🧠 LLM Engine<br/>Groq / Gemini<br/><br/>• Intent recognition<br/>• Tool selection<br/>• Response generation<br/>• Multi-agent reasoning"]
+    end
+
+    subgraph "MCP Protocol Layer"
+        MCP["📡 MCP Server<br/>JSON-RPC Interface<br/><br/>• Tool registration<br/>• Schema validation<br/>• Request/Response handling"]
+    end
+
+    subgraph "Tools Layer - tools/"
+        GMAIL["📧 Gmail Tools<br/>• send_email<br/>• read_inbox<br/>• create_draft"]
+        CAL["📅 Calendar Tools<br/>• create_event<br/>• list_events<br/>• update_event"]
+        SLACK["💬 Slack Tools<br/>• send_message<br/>• list_channels<br/>• post_thread"]
+        DOCS["📄 Docs Tools<br/>• generate_pdf<br/>• create_doc<br/>• extract_text"]
+        SMS["📱 SMS Tools<br/>• send_sms<br/>• send_bulk<br/>• templates"]
+    end
+
+    subgraph "External Services"
+        GAPI["Gmail API"]
+        CAPI["Google Calendar API"]
+        SAPI["Slack API"]
+        DAPI["Google Docs API"]
+        TAPI["Twilio API"]
+    end
+
+    subgraph "Data Layer"
+        MONGO["MongoDB<br/>Conversations<br/>Messages<br/>User Profiles"]
+        REDIS["Redis<br/>Sessions<br/>State<br/>Cache"]
+    end
+
+    %% User to Frontend
+    U -->|"User Input"| FE
+    FE -->|"Display Response"| U
+
+    %% Frontend to Backend
+    FE -->|"HTTP/WebSocket<br/>Chat Request"| BE
+    BE -->|"Streaming Response<br/>Tool Status"| FE
+
+    %% Backend to LLM
+    BE -->|"User Intent +<br/>Available Tools"| LLM
+    LLM -->|"Selected Tools +<br/>Parameters"| BE
+
+    %% Backend to MCP
+    BE -->|"Tool Call Request<br/>JSON-RPC"| MCP
+    MCP -->|"Tool Result<br/>JSON-RPC"| BE
+
+    %% MCP to Tools
+    MCP -->|"Invoke Tool"| GMAIL
+    MCP -->|"Invoke Tool"| CAL
+    MCP -->|"Invoke Tool"| SLACK
+    MCP -->|"Invoke Tool"| DOCS
+    MCP -->|"Invoke Tool"| SMS
+
+    GMAIL -->|"Result"| MCP
+    CAL -->|"Result"| MCP
+    SLACK -->|"Result"| MCP
+    DOCS -->|"Result"| MCP
+    SMS -->|"Result"| MCP
+
+    %% Tools to External APIs
+    GMAIL <-->|"OAuth 2.0"| GAPI
+    CAL <-->|"OAuth 2.0"| CAPI
+    SLACK <-->|"OAuth 2.0"| SAPI
+    DOCS <-->|"OAuth 2.0"| DAPI
+    SMS <-->|"API Key"| TAPI
+
+    %% Backend to Data Layer
+    BE <-->|"Store/Retrieve"| MONGO
+    BE <-->|"Session Data"| REDIS
+
+    %% Styling
+    classDef frontend fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef backend fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef mcp fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef tools fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef external fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef data fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+
+    class U,FE frontend
+    class BE,LLM backend
+    class MCP mcp
+    class GMAIL,CAL,SLACK,DOCS,SMS tools
+    class GAPI,CAPI,SAPI,DAPI,TAPI external
+    class MONGO,REDIS data
 ```
 
 ### Data Flow
