@@ -1,10 +1,11 @@
 """FastAPI application for AI Assistant backend."""
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import uuid
 from datetime import datetime
+from typing import Optional, List
 
 from models.schema import (
     UserRequest,
@@ -18,6 +19,8 @@ from models.schema import (
 from db.mongo_client import MongoDBClient, mongodb_client
 from utils.config import get_settings
 from utils.state_manager import StateManager, state_manager
+from utils.conversation_manager import ConversationManager
+from utils.websocket_handler import ConnectionManager, WebSocketChatHandler
 from utils.gemini_client import GeminiClient
 from utils.llm_router import LLMRouter
 from tools.google_auth import GoogleAuthHandler
@@ -58,6 +61,14 @@ async def lifespan(app: FastAPI):
         default_ttl=settings.redis_ttl
     )
     await state_manager.connect()
+    
+    # Initialize Conversation Manager
+    global conversation_manager
+    conversation_manager = ConversationManager(mongodb_client)
+    
+    # Initialize WebSocket Connection Manager
+    global connection_manager
+    connection_manager = ConnectionManager()
     
     logger.info("Application started successfully")
     
@@ -912,6 +923,304 @@ async def execute_sms_action(sms_tool: SMSTool, tool_action: ToolAction) -> str:
     
     else:
         raise ValueError(f"Unknown SMS action: {action}")
+
+
+# ============================================================================
+# WebSocket Endpoint for Real-Time Chat
+# ============================================================================
+
+@app.websocket("/ws/chat")
+async def websocket_chat_endpoint(
+    websocket: WebSocket,
+    user_id: str = Query(..., description="User ID"),
+    session_id: Optional[str] = Query(None, description="Session ID")
+):
+    """WebSocket endpoint for real-time chat."""
+    ws_handler = WebSocketChatHandler(
+        conversation_manager=conversation_manager,
+        state_manager=state_manager,
+        connection_manager=connection_manager
+    )
+    
+    await ws_handler.handle_connection(websocket, user_id, session_id)
+
+
+# ============================================================================
+# Conversation Management Endpoints
+# ============================================================================
+
+@app.get("/api/conversations")
+async def get_user_conversations(
+    user_id: str = Query(..., description="User ID"),
+    limit: int = Query(50, description="Number of conversations to retrieve"),
+    skip: int = Query(0, description="Number of conversations to skip"),
+    include_archived: bool = Query(False, description="Include archived conversations")
+):
+    """Get all conversations for a user."""
+    try:
+        conversations = await conversation_manager.get_user_conversations(
+            user_id=user_id,
+            limit=limit,
+            skip=skip,
+            include_archived=include_archived
+        )
+        
+        return {
+            "conversations": [c.model_dump() for c in conversations],
+            "total": len(conversations)
+        }
+    except Exception as e:
+        logger.error(f"Error getting conversations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    """Get a specific conversation by ID."""
+    try:
+        conversation = await conversation_manager.get_conversation(conversation_id)
+        
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        return conversation.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def get_conversation_messages(
+    conversation_id: str,
+    limit: Optional[int] = Query(None, description="Number of messages to retrieve")
+):
+    """Get messages for a specific conversation."""
+    try:
+        messages = await conversation_manager.get_conversation_history(
+            conversation_id=conversation_id,
+            limit=limit
+        )
+        
+        return {
+            "conversation_id": conversation_id,
+            "messages": [m.model_dump() for m in messages],
+            "total": len(messages)
+        }
+    except Exception as e:
+        logger.error(f"Error getting conversation messages: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/conversations")
+async def create_conversation(
+    user_id: str = Query(..., description="User ID"),
+    session_id: str = Query(..., description="Session ID"),
+    first_message: Optional[str] = Query(None, description="First message to initialize conversation")
+):
+    """Create a new conversation."""
+    try:
+        conversation = await conversation_manager.create_conversation(
+            user_id=user_id,
+            session_id=session_id,
+            first_message=first_message
+        )
+        
+        return conversation.model_dump()
+    except Exception as e:
+        logger.error(f"Error creating conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/conversations/{conversation_id}")
+async def update_conversation(
+    conversation_id: str,
+    title: Optional[str] = Query(None, description="New conversation title")
+):
+    """Update a conversation."""
+    try:
+        if title:
+            success = await conversation_manager.update_conversation_title(
+                conversation_id=conversation_id,
+                title=title
+            )
+            
+            if not success:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            
+            return {"message": "Conversation updated successfully"}
+        
+        return {"message": "No updates provided"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    try:
+        success = await conversation_manager.delete_conversation(conversation_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        return {"message": "Conversation deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/conversations/{conversation_id}/archive")
+async def archive_conversation(conversation_id: str):
+    """Archive a conversation."""
+    try:
+        success = await conversation_manager.archive_conversation(conversation_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        return {"message": "Conversation archived successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Session Management Endpoints
+# ============================================================================
+
+@app.post("/api/sessions")
+async def create_session(
+    user_id: str = Query(..., description="User ID"),
+    device_info: Optional[dict] = None
+):
+    """Create a new user session."""
+    try:
+        session = await conversation_manager.create_session(
+            user_id=user_id,
+            device_info=device_info
+        )
+        
+        return session.model_dump()
+    except Exception as e:
+        logger.error(f"Error creating session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Get a specific session by ID."""
+    try:
+        session = await conversation_manager.get_session(session_id)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return session.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/sessions/{session_id}/end")
+async def end_session(session_id: str):
+    """End a user session."""
+    try:
+        success = await conversation_manager.end_session(session_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {"message": "Session ended successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# User Activity Logs Endpoints
+# ============================================================================
+
+@app.get("/api/users/{user_id}/activity")
+async def get_user_activity(
+    user_id: str,
+    limit: int = Query(100, description="Number of activity logs to retrieve"),
+    activity_type: Optional[str] = Query(None, description="Filter by activity type")
+):
+    """Get user activity logs."""
+    try:
+        logs = await conversation_manager.get_user_activity_logs(
+            user_id=user_id,
+            limit=limit,
+            activity_type=activity_type
+        )
+        
+        return {
+            "user_id": user_id,
+            "logs": [log.model_dump() for log in logs],
+            "total": len(logs)
+        }
+    except Exception as e:
+        logger.error(f"Error getting user activity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/{user_id}/profile")
+async def get_user_profile(user_id: str):
+    """Get user profile."""
+    try:
+        profile = await conversation_manager.get_or_create_user_profile(user_id)
+        return profile.model_dump()
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Analytics Endpoints
+# ============================================================================
+
+@app.get("/api/users/{user_id}/stats")
+async def get_user_stats(user_id: str):
+    """Get user statistics."""
+    try:
+        profile = await conversation_manager.get_or_create_user_profile(user_id)
+        conversations = await conversation_manager.get_user_conversations(
+            user_id=user_id,
+            limit=1000
+        )
+        
+        # Calculate additional stats
+        total_messages_in_conversations = sum(
+            len(c.messages) for c in conversations
+        )
+        
+        return {
+            "user_id": user_id,
+            "total_conversations": profile.total_conversations,
+            "total_messages": profile.total_messages,
+            "total_tokens_used": profile.total_tokens_used,
+            "total_messages_in_conversations": total_messages_in_conversations,
+            "active_conversations": len([c for c in conversations if not c.is_archived]),
+            "archived_conversations": len([c for c in conversations if c.is_archived]),
+            "account_created": profile.created_at.isoformat(),
+            "last_login": profile.last_login.isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting user stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
