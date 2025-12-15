@@ -1,10 +1,19 @@
 import React from 'react';
 import {
   Search,
+  Home,
+  MessageSquare,
+  BookOpen,
   Zap,
   Plus,
+  MoreVertical,
+  ChevronDown,
+  LogOut,
+  User,
+  Settings,
+  Command
 } from 'lucide-react';
-import { SIDEBAR_NAVIGATION, HISTORY_SECTIONS } from '../constants.tsx';
+import { SIDEBAR_NAVIGATION } from '../constants.tsx';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -12,9 +21,10 @@ interface SidebarProps {
   setActiveNav: (id: string) => void;
   onNewChat: () => void;
   onPromptSelect?: (prompt: string) => void;
+  children?: React.ReactNode;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNav, onNewChat, onPromptSelect }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNav, onNewChat, onPromptSelect, children }) => {
   return (
     <div className={`
       fixed inset-y-0 left-0 z-40 w-72 bg-gray-50 dark:bg-[#0f0f10] text-gray-600 dark:text-gray-300 transform transition-transform duration-300 ease-in-out border-r border-gray-200 dark:border-white/5
@@ -70,31 +80,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNa
         ))}
       </div>
 
-      {/* Scrollable Content - History */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-2 pt-2">
-
-        {/* History Label */}
-        <div className="px-3 mb-2 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-          History
-        </div>
-
-        {/* History Sections */}
-        {HISTORY_SECTIONS.map((section) => (
-          <div key={section.title} className="mb-6">
-            <div className="px-3 mb-2 text-[11px] font-medium text-gray-500 dark:text-gray-600">{section.title}</div>
-            <div className="space-y-0.5">
-              {section.items.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => onPromptSelect?.(item.label)}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1c1c1e] hover:text-gray-900 dark:hover:text-gray-200 rounded-lg group transition-colors"
-                >
-                  <span className="truncate">{item.label}</span>
-                </button>
-              ))}
-            </div>
+      {/* Scrollable Content - Children or Empty */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {children || (
+          <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
+            No conversations yet
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

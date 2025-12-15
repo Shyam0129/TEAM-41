@@ -75,7 +75,7 @@ SLACK_BOT_TOKEN=xoxb-your-token-here
 
 ---
 
-### 4. Twilio Credentials (SMS)
+### 4. Twilio Credentials (SMS)(optional)
 
 **Purpose**: Send SMS and MMS messages
 

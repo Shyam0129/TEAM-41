@@ -29,9 +29,16 @@ class Settings(BaseSettings):
     google_credentials_file: str = "credentials.json"
     google_token_file: str = "token.json"
     
+    # LLM Configuration
+    llm_provider: str = "groq"  # Options: "gemini" or "groq"
+    
     # Gemini AI
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-pro"
+    gemini_model: str = "gemini-2.0-flash"
+    
+    # Groq AI
+    groq_api_key: Optional[str] = None
+    groq_model: str = "llama-3.3-70b-versatile"
     
     # Slack
     slack_bot_token: Optional[str] = None

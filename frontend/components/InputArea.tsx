@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, Sparkles, Command, Bot, Zap, Star, Square, Mic } from 'lucide-react';
-import { INITIAL_SUGGESTIONS } from '../constants.tsx';
+import { Plus, ArrowUp, Square, Mic, Mail, MessageSquare, Calendar, FileText, Smartphone, X } from 'lucide-react';
 
 interface InputAreaProps {
   onSend: (message: string) => void;
@@ -11,49 +10,57 @@ interface InputAreaProps {
   isGenerating?: boolean;
 }
 
+const AVAILABLE_TOOLS = [
+  { id: 'gmail', name: 'Gmail', icon: Mail, description: 'Send emails', color: 'text-red-500' },
+  { id: 'slack', name: 'Slack', icon: MessageSquare, description: 'Send Slack messages', color: 'text-purple-500' },
+  { id: 'calendar', name: 'Calendar', icon: Calendar, description: 'Manage calendar events', color: 'text-blue-500' },
+  { id: 'docs', name: 'Docs', icon: FileText, description: 'Create documents', color: 'text-blue-600' },
+  { id: 'sms', name: 'SMS', icon: Smartphone, description: 'Send text messages', color: 'text-green-500' },
+];
+
 export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, isExpanded = true, value, isGenerating }) => {
   const [input, setInput] = useState('');
-  const [showPrompts, setShowPrompts] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const promptMenuRef = useRef<HTMLDivElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
 
-  // Allow external control of input value (for sidebar clicks)
   useEffect(() => {
     if (value) {
       setInput(value);
-      // Auto-focus when value is set from outside
       if (textareaRef.current) {
         textareaRef.current.focus();
       }
     }
   }, [value]);
 
-  // Close prompts menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (promptMenuRef.current && !promptMenuRef.current.contains(event.target as Node)) {
-        setShowPrompts(false);
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(event.target as Node)) {
+        setShowToolsMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || disabled) return;
-    onSend(input);
+
+    const messageWithTool = selectedTool
+      ? `[Using ${AVAILABLE_TOOLS.find(t => t.id === selectedTool)?.name}] ${input}`
+      : input;
+
+    onSend(messageWithTool);
     setInput('');
-    setShowPrompts(false);
+    setSelectedTool(null);
+    setShowToolsMenu(false);
   };
 
   const handleStop = (e?: React.MouseEvent) => {
     e?.preventDefault();
-    if (onStop) {
-      onStop();
-    }
+    if (onStop) onStop();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -63,124 +70,129 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSend, onStop, disabled, 
     }
   };
 
-  const handlePromptClick = (prompt: string) => {
-    setInput(prompt);
-    setShowPrompts(false);
-    if (textareaRef.current) {
-        textareaRef.current.focus();
-    }
+  const handleToolSelect = (toolId: string) => {
+    setSelectedTool(toolId);
+    setShowToolsMenu(false);
+    if (textareaRef.current) textareaRef.current.focus();
   };
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [input]);
 
+  const selectedToolInfo = selectedTool ? AVAILABLE_TOOLS.find(t => t.id === selectedTool) : null;
+
   return (
-    <div className="w-full max-w-4xl mx-auto relative">
-      
-      {/* Prompt Menu Popup */}
-      {showPrompts && (
-        <div ref={promptMenuRef} className="absolute bottom-full left-0 mb-3 w-72 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
-           <div className="px-4 py-3 border-b border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/5 flex items-center justify-between">
-             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Quick Prompts</span>
-             <Zap className="w-3 h-3 text-blue-500 dark:text-blue-400" />
-           </div>
-           <div className="max-h-64 overflow-y-auto custom-scrollbar p-1">
-             {INITIAL_SUGGESTIONS.map((suggestion, idx) => (
-               <button
-                 key={idx}
-                 onClick={() => handlePromptClick(suggestion)}
-                 className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-blue-600 dark:hover:text-white rounded-lg transition-colors truncate flex items-center gap-2"
-               >
-                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50 flex-shrink-0"></span>
-                 <span className="truncate">{suggestion}</span>
-               </button>
-             ))}
-           </div>
+    <div className="w-full relative">
+
+      {/* Tools Menu Popup */}
+      {showToolsMenu && (
+        <div ref={toolsMenuRef} className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-[#2c2c2e] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in-up">
+          <div className="p-2">
+            <div className="px-3 py-2 border-b border-gray-200 dark:border-white/10">
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Select a tool</p>
+            </div>
+            <div className="mt-1 space-y-0.5">
+              {AVAILABLE_TOOLS.map((tool) => {
+                const Icon = tool.icon;
+                return (
+                  <button
+                    key={tool.id}
+                    onClick={() => handleToolSelect(tool.id)}
+                    className="w-full text-left px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors flex items-center gap-3"
+                  >
+                    <Icon className={`w-4 h-4 ${tool.color}`} />
+                    <div className="flex-1">
+                      <div className="font-medium">{tool.name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-500">{tool.description}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="relative bg-white dark:bg-[#1c1c1e] rounded-2xl border border-gray-200 dark:border-white/10 focus-within:border-blue-400 dark:focus-within:border-white/20 transition-all shadow-xl shadow-black/5 dark:shadow-black/20">
-        
-        {/* Robot / Prompts Button */}
-        <div className="absolute left-3 top-3 z-10">
-           <button 
-             onClick={() => setShowPrompts(!showPrompts)}
-             className="relative p-2 bg-blue-50 dark:bg-[#2c2c2e]/50 hover:bg-blue-100 dark:hover:bg-[#3a3a3c] rounded-lg transition-colors group overflow-visible"
-             title="Open AI prompts"
-           >
-             <Bot className={`w-5 h-5 text-blue-500 dark:text-blue-400 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-transform duration-300 ${showPrompts ? 'scale-110' : ''}`} />
-             
-             {/* Animated Thinking Dots */}
-             {!showPrompts && (
-               <div className="absolute -top-0.5 -right-0.5 flex space-x-[1px] bg-white dark:bg-[#1c1c1e] rounded-full px-1 py-0.5 border border-blue-100 dark:border-blue-500/30">
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.2s' }}></div>
-                  <div className="w-1 h-1 bg-blue-500 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDuration: '1s', animationDelay: '0.4s' }}></div>
-               </div>
-             )}
+      {/* Main Input Container */}
+      <div className="relative bg-white dark:bg-[#2c2c2e] rounded-3xl border border-gray-200 dark:border-white/10 focus-within:border-gray-300 dark:focus-within:border-white/20 transition-all shadow-sm hover:shadow-md">
 
-             {/* Magical Floating Particles - Decoration */}
-             {!showPrompts && (
-               <>
-                 <Sparkles className="absolute -top-2 -left-2 w-3 h-3 text-yellow-400 animate-pulse opacity-0 group-hover:opacity-100 transition-opacity duration-700 delay-75" style={{ animationDuration: '2s' }} />
-                 <Star className="absolute -bottom-1 -right-2 w-2.5 h-2.5 text-blue-400 animate-float opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-               </>
-             )}
-           </button>
+        {/* Selected Tool Badge */}
+        {selectedToolInfo && (
+          <div className="absolute left-14 top-3 z-10">
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 px-2.5 py-1 rounded-full">
+              <selectedToolInfo.icon className={`w-3.5 h-3.5 ${selectedToolInfo.color}`} />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{selectedToolInfo.name}</span>
+              <button
+                onClick={() => setSelectedTool(null)}
+                className="ml-1 hover:bg-gray-200 dark:hover:bg-white/10 rounded-full p-0.5"
+              >
+                <X className="w-3 h-3 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Left Side - Plus Button */}
+        <div className={`absolute left-4 z-10 ${selectedToolInfo ? 'top-14' : 'bottom-4'}`}>
+          <button
+            onClick={() => setShowToolsMenu(!showToolsMenu)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors group"
+            title="Select tool"
+          >
+            <Plus className="w-5 h-5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors" />
+          </button>
         </div>
 
+        {/* Textarea */}
         <textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Rexie anything..."
-          className="w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-base py-4 pr-12 pl-14 rounded-2xl resize-none focus:outline-none min-h-[56px] max-h-[150px] overflow-y-auto scrollbar-hide"
+          placeholder="Message Rexie..."
+          className={`w-full bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-[15px] py-4 pr-32 pl-14 rounded-3xl resize-none focus:outline-none min-h-[56px] max-h-[200px] overflow-y-auto custom-scrollbar leading-relaxed ${selectedToolInfo ? 'pt-12' : ''}`}
           rows={1}
           disabled={disabled && !isGenerating}
         />
-        
-        {/* Send / Stop Button */}
-        <button
-          onClick={isGenerating ? handleStop : () => handleSubmit()}
-          disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
-          className={`
-            absolute right-3 top-3 p-1.5 rounded-lg transition-all duration-200
-            ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
-              ? 'bg-blue-600 dark:bg-white text-white dark:text-black hover:bg-blue-700 dark:hover:bg-gray-200 shadow-md' 
-              : 'bg-gray-200 dark:bg-[#2c2c2e] text-gray-400 dark:text-gray-500 cursor-not-allowed'}
-          `}
-        >
-          {isGenerating ? (
-            <Square className="w-4 h-4 fill-current" />
-          ) : (
-            <ArrowUp className="w-4 h-4" />
-          )}
-        </button>
 
-        {/* Footer Actions inside Input */}
-        <div className="flex items-center justify-between px-3 pb-3 pt-1 ml-11">
-          <div className="flex items-center gap-1">
-             {/* Spacer */}
-          </div>
+        {/* Right Side - Action Buttons */}
+        <div className="absolute right-3 bottom-3 flex items-center gap-1">
+          {/* Voice Button */}
+          <button
+            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            title="Voice input"
+          >
+            <Mic className="w-5 h-5" />
+          </button>
 
-          <div className="flex items-center gap-1">
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Attach">
-                <Paperclip className="w-4 h-4" />
-             </button>
-             <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-[#2c2c2e] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors" title="Voice">
-                <Mic className="w-4 h-4" />
-             </button>
-          </div>
+          {/* Send / Stop Button */}
+          <button
+            onClick={isGenerating ? handleStop : () => handleSubmit()}
+            disabled={(!input.trim() && !isGenerating) || (disabled && !isGenerating)}
+            className={`
+              p-2.5 rounded-lg transition-all duration-200
+              ${(input.trim() || isGenerating) && !(disabled && !isGenerating)
+                ? 'bg-gray-900 dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-100 shadow-sm'
+                : 'bg-gray-200 dark:bg-[#3a3a3c] text-gray-400 dark:text-gray-600 cursor-not-allowed'}
+            `}
+            title={isGenerating ? "Stop generating" : "Send message"}
+          >
+            {isGenerating ? (
+              <Square className="w-4 h-4 fill-current" />
+            ) : (
+              <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+            )}
+          </button>
         </div>
       </div>
-      
-      <div className="text-center mt-3">
-        <p className="text-[10px] text-gray-400 dark:text-gray-600">
+
+      {/* Footer Text */}
+      <div className="text-center mt-2.5">
+        <p className="text-[11px] text-gray-400 dark:text-gray-600 font-light">
           Rexie can make mistakes. Consider checking important information.
         </p>
       </div>

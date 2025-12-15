@@ -25,7 +25,8 @@ class GoogleAuthHandler:
         self,
         credentials_file: str = 'credentials.json',
         token_file: str = 'token.json',
-        scopes: Optional[List[str]] = None
+        scopes: Optional[List[str]] = None,
+        redirect_uri: Optional[str] = None
     ):
         """
         Initialize Google Auth Handler.
@@ -34,10 +35,12 @@ class GoogleAuthHandler:
             credentials_file: Path to OAuth credentials JSON file
             token_file: Path to store/load OAuth tokens
             scopes: List of OAuth scopes to request
+            redirect_uri: Custom redirect URI (e.g., ngrok URL). If None, uses localhost
         """
         self.credentials_file = credentials_file
         self.token_file = token_file
         self.scopes = scopes or self.DEFAULT_SCOPES
+        self.redirect_uri = redirect_uri
         self.creds: Optional[Credentials] = None
     
     def authenticate(self) -> Credentials:
@@ -67,7 +70,41 @@ class GoogleAuthHandler:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_file, self.scopes
                 )
-                self.creds = flow.run_local_server(port=0)
+                
+                # Use custom redirect URI if provided (e.g., ngrok)
+                if self.redirect_uri:
+                    logger.info(f"Using custom redirect URI: {self.redirect_uri}")
+                    flow.redirect_uri = self.redirect_uri
+                    
+                    # For custom URIs, we need to manually handle the flow
+                    auth_url, _ = flow.authorization_url(prompt='consent')
+                    
+                    logger.info("=" * 60)
+                    logger.info("MANUAL OAUTH FLOW")
+                    logger.info("=" * 60)
+                    logger.info(f"1. Open this URL in your browser:\n   {auth_url}")
+                    logger.info(f"2. After authorization, you'll be redirected to: {self.redirect_uri}")
+                    logger.info("3. Copy the FULL redirect URL from your browser")
+                    logger.info("=" * 60)
+                    
+                    print("\n" + "=" * 60)
+                    print("MANUAL OAUTH FLOW")
+                    print("=" * 60)
+                    print(f"\n1. Open this URL in your browser:\n   {auth_url}\n")
+                    print(f"2. After authorization, you'll be redirected to:\n   {self.redirect_uri}\n")
+                    print("3. Copy the FULL redirect URL from your browser address bar")
+                    print("   (It will contain 'code=' and 'state=' parameters)")
+                    print("=" * 60)
+                    
+                    redirect_response = input("\nPaste the full redirect URL here: ").strip()
+                    
+                    # Extract the code from the redirect URL
+                    flow.fetch_token(authorization_response=redirect_response)
+                    self.creds = flow.credentials
+                else:
+                    # Use localhost automatic flow
+                    logger.info("Using localhost OAuth flow on port 8000")
+                    self.creds = flow.run_local_server(port=8000)
             
             # Save credentials for future use
             with open(self.token_file, 'w') as token:
