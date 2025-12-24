@@ -30,6 +30,11 @@ from tools.docs_tool import DocsTool
 from tools.slack_tool import SlackTool
 from tools.sms_tool import SMSTool
 
+# Production OAuth imports
+from starlette.middleware.sessions import SessionMiddleware
+from auth import init_jwt_handler
+from routes.auth_routes import router as auth_router
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -96,6 +101,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add session middleware for OAuth
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret_key
+)
+
+# Initialize JWT handler
+init_jwt_handler(
+    secret_key=settings.jwt_secret_key,
+    algorithm=settings.jwt_algorithm,
+    access_token_expire_minutes=settings.jwt_access_token_expire_minutes,
+    refresh_token_expire_days=settings.jwt_refresh_token_expire_days
+)
+
+# Register authentication routes
+app.include_router(auth_router)
 
 
 @app.get("/")
