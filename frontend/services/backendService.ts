@@ -46,11 +46,22 @@ export const streamChatResponse = async (
             },
         };
 
+        // Get access token from localStorage
+        const accessToken = localStorage.getItem('access_token');
+
+        // Build headers
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+
+        // Add Authorization header if user is authenticated
+        if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
         const response = await fetch(`${API_BASE_URL}/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: headers,
             body: JSON.stringify(requestBody),
             signal: abortSignal,
         });
@@ -121,11 +132,22 @@ export const confirmAction = async (
     confirmed: boolean
 ): Promise<any> => {
     try {
+        // Get access token from localStorage
+        const accessToken = localStorage.getItem('access_token');
+
+        // Build headers
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+
+        // Add Authorization header if user is authenticated
+        if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
         const response = await fetch(`${API_BASE_URL}/confirm/${sessionId}`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: headers,
             body: JSON.stringify({ confirmed }),
         });
 
