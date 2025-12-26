@@ -25,9 +25,30 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_ttl: int = 3600  # 1 hour default TTL
     
-    # Google APIs
+    # Google APIs (Old single-user - deprecated)
     google_credentials_file: str = "credentials.json"
     google_token_file: str = "token.json"
+    
+    # Google OAuth (Multi-user production)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/auth/callback"
+    
+    # URLs
+    frontend_url: str = "http://localhost:3000"
+    backend_url: str = "http://localhost:8000"
+    
+    # JWT Settings
+    jwt_secret_key: str = "your-jwt-secret-key-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 30
+    
+    # Session
+    session_secret_key: str = "your-session-secret-key-change-in-production"
+    
+    # MongoDB Database Name
+    mongodb_db_name: str = "rexie_dev"
     
     # LLM Configuration
     llm_provider: str = "groq"  # Options: "gemini" or "groq"
