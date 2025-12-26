@@ -1,5 +1,5 @@
 """FastAPI application for AI Assistant backend."""
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -33,7 +33,10 @@ from tools.sms_tool import SMSTool
 # Production OAuth imports
 from starlette.middleware.sessions import SessionMiddleware
 from auth import init_jwt_handler
+from auth.dependencies import get_optional_user
 from routes.auth_routes import router as auth_router
+from models.user import User
+from services.user_service import UserService
 
 # Configure logging
 logging.basicConfig(
@@ -183,7 +186,7 @@ async def download_file(filename: str):
 
 
 @app.post("/chat", response_model=AgentResponse)
-async def chat(request: UserRequest):
+async def chat(request: UserRequest, current_user: Optional[User] = Depends(get_optional_user)):
     try:
         session_id = request.session_id or str(uuid.uuid4())
 
@@ -204,7 +207,7 @@ async def chat(request: UserRequest):
             if state.pending_action and state.pending_action.tool_type == ToolType.GMAIL:
                 if user_reply in ["send", "s"]:
                     # Send email immediately
-                    result = await execute_tool_action(state.pending_action)
+                    result = await execute_tool_action(state.pending_action, current_user)
                     
                     state.status = ConversationStatus.COMPLETED
                     state.pending_action = None
@@ -217,12 +220,28 @@ async def chat(request: UserRequest):
                     )
                 
                 elif user_reply in ["draft", "d"]:
-                    # Save as draft
-                    auth_handler = GoogleAuthHandler(
-                        credentials_file=settings.google_credentials_file,
-                        token_file=settings.google_token_file
+                    # Save as draft using user's Google credentials
+                    if not current_user or not current_user.google_tokens:
+                        return AgentResponse(
+                            response="Please sign in with Google to save drafts.",
+                            session_id=session_id,
+                            action_required=False
+                        )
+                    
+                    from google.oauth2.credentials import Credentials
+                    from tools.gmail_tool_v2 import GmailToolV2
+                    
+                    google_tokens = current_user.google_tokens
+                    creds = Credentials(
+                        token=google_tokens.get('access_token'),
+                        refresh_token=google_tokens.get('refresh_token'),
+                        token_uri=google_tokens.get('token_uri'),
+                        client_id=google_tokens.get('client_id'),
+                        client_secret=google_tokens.get('client_secret'),
+                        scopes=google_tokens.get('scopes')
                     )
-                    gmail_tool = GmailTool(auth_handler)
+                    
+                    gmail_tool = GmailToolV2(creds)
                     
                     params = state.pending_action.parameters
                     draft = gmail_tool.create_draft(
@@ -312,7 +331,7 @@ async def chat(request: UserRequest):
                 tool_action = llm_router.create_tool_action(intent, task["parameters"])
                 
                 if tool_action:
-                    result = await execute_tool_action(tool_action)
+                    result = await execute_tool_action(tool_action, current_user)
                     results.append(f"✅ {task['description']}\n{result}")
                     logger.info(f"Completed task: {task['description']}")
             
@@ -411,7 +430,7 @@ Would you like to:
                 )
 
         elif tool_action:
-            result = await execute_tool_action(tool_action)
+            result = await execute_tool_action(tool_action, current_user)
 
             state.status = ConversationStatus.COMPLETED
             state.conversation_history.append({
@@ -446,7 +465,7 @@ Would you like to:
     except Exception as e:
         logger.exception("Chat error")
         raise HTTPException(status_code=500, detail=str(e))
-async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
+async def confirm_pending_action(session_id: str, confirmed: bool, current_user: Optional[User] = None) -> dict:
     state = await state_manager.get_state(session_id)
 
     if not state:
@@ -465,7 +484,7 @@ async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
             action_required=False
         )
 
-    result = await execute_tool_action(state.pending_action)
+    result = await execute_tool_action(state.pending_action, current_user)
 
     state.status = ConversationStatus.COMPLETED
     state.pending_action = None
@@ -485,8 +504,8 @@ async def confirm_pending_action(session_id: str, confirmed: bool) -> dict:
 
 
 @app.post("/confirm/{session_id}")
-async def confirm_action(session_id: str, confirmed: bool):
-    return await confirm_pending_action(session_id, confirmed)
+async def confirm_action(session_id: str, confirmed: bool, current_user: Optional[User] = Depends(get_optional_user)):
+    return await confirm_pending_action(session_id, confirmed, current_user)
     """
     Confirm or reject a pending action.
     
@@ -537,12 +556,13 @@ async def confirm_action(session_id: str, confirmed: bool):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def execute_tool_action(tool_action):
+async def execute_tool_action(tool_action, user: Optional[User] = None):
     """
     Execute a tool action.
     
     Args:
         tool_action: ToolAction to execute
+        user: Authenticated user (for Google API tools)
         
     Returns:
         Execution result
@@ -550,23 +570,62 @@ async def execute_tool_action(tool_action):
     logger.info(f"Executing tool action: {tool_action.tool_type} - {tool_action.action}")
     
     try:
-        # Initialize Google Auth Handler
-        auth_handler = GoogleAuthHandler(
-            credentials_file=settings.google_credentials_file,
-            token_file=settings.google_token_file
-        )
+        # For Google API tools (Gmail, Calendar, Docs), use user's OAuth tokens
+        if tool_action.tool_type in [ToolType.GMAIL, ToolType.CALENDAR, ToolType.DOCS]:
+            if not user or not user.google_tokens:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Please sign in with Google to use this feature"
+                )
+            
+            # Create Google credentials from user's tokens
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request as GoogleRequest
+            
+            google_tokens = user.google_tokens
+            creds = Credentials(
+                token=google_tokens.get('access_token'),
+                refresh_token=google_tokens.get('refresh_token'),
+                token_uri=google_tokens.get('token_uri'),
+                client_id=google_tokens.get('client_id'),
+                client_secret=google_tokens.get('client_secret'),
+                scopes=google_tokens.get('scopes')
+            )
+            
+            # Refresh if expired
+            if creds.expired and creds.refresh_token:
+                logger.info(f"Refreshing Google token for user {user.user_id}")
+                creds.refresh(GoogleRequest())
+                
+                # Update tokens in database
+                user_service = UserService()
+                await user_service.update_google_tokens(
+                    user.user_id,
+                    {
+                        'access_token': creds.token,
+                        'refresh_token': creds.refresh_token,
+                        'token_uri': creds.token_uri,
+                        'client_id': creds.client_id,
+                        'client_secret': creds.client_secret,
+                        'scopes': creds.scopes,
+                        'expiry': creds.expiry.isoformat() if creds.expiry else None
+                    }
+                )
         
         # Execute based on tool type
         if tool_action.tool_type == ToolType.GMAIL:
-            gmail_tool = GmailTool(auth_handler)
+            from tools.gmail_tool_v2 import GmailToolV2
+            gmail_tool = GmailToolV2(creds)
             return await execute_gmail_action(gmail_tool, tool_action)
         
         elif tool_action.tool_type == ToolType.CALENDAR:
-            calendar_tool = CalendarTool(auth_handler)
+            from tools.calendar_tool_v2 import CalendarToolV2
+            calendar_tool = CalendarToolV2(creds)
             return await execute_calendar_action(calendar_tool, tool_action)
         
         elif tool_action.tool_type == ToolType.DOCS:
-            docs_tool = DocsTool(auth_handler)
+            from tools.docs_tool_v2 import DocsToolV2
+            docs_tool = DocsToolV2(creds)
             return await execute_docs_action(docs_tool, tool_action)
         
         elif tool_action.tool_type == ToolType.SLACK:
