@@ -1,0 +1,97 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔐 Setup SSH
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+    - name: 🔑 Add EC2 to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: 🚀 Deploy to EC2
+      run: |
+        ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+          set -e
+          
+          echo "📦 Pulling latest code..."
+          cd ~/TEAM-41
+          git pull origin main
+          
+          echo "🔧 Updating backend..."
+          cd backend
+          source venv/bin/activate
+          pip install -r requirements.txt --quiet
+          
+          echo "♻️ Restarting backend..."
+          pm2 restart rexie-backend || pm2 start ecosystem.config.js
+          
+          echo "🎨 Building frontend..."
+          cd ../frontend
+          npm install --silent
+          npm run build
+          
+          echo "🌐 Reloading Nginx..."
+          sudo systemctl reload nginx
+          
+          echo "✅ Deployment completed successfully!"
+        ENDSSH
+
+    - name: 🏥 Health Check
+      run: |
+        echo "⏳ Waiting for services to start..."
+        sleep 15
+        
+        echo "🔍 Checking backend health..."
+        response=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}/health)
+        
+        if [ $response -eq 200 ]; then
+          echo "✅ Health check passed! Backend is healthy."
+        else
+          echo "❌ Health check failed! Status code: $response"
+          exit 1
+        fi
+
+    - name: 📊 Deployment Summary
+      if: success()
+      run: |
+        echo "🎉 Deployment Summary"
+        echo "===================="
+        echo "✅ Code pulled from main branch"
+        echo "✅ Backend dependencies updated"
+        echo "✅ Backend restarted with PM2"
+        echo "✅ Frontend rebuilt"
+        echo "✅ Nginx reloaded"
+        echo "✅ Health check passed"
+        echo ""
+        echo "🌐 Application URL: http://${{ secrets.EC2_HOST }}"
+        echo "📚 API Docs: http://${{ secrets.EC2_HOST }}/api/docs"
+
+    - name: ❌ Deployment Failed
+      if: failure()
+      run: |
+        echo "❌ Deployment failed!"
+        echo "Please check the logs above for errors."
+        echo "Common issues:"
+        echo "  - SSH connection failed"
+        echo "  - Git pull failed (merge conflicts?)"
+        echo "  - Dependencies installation failed"
+        echo "  - PM2 restart failed"
+        echo "  - Health check failed"

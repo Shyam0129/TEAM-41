@@ -23,17 +23,12 @@ from utils.conversation_manager import ConversationManager
 from utils.websocket_handler import ConnectionManager, WebSocketChatHandler
 from utils.gemini_client import GeminiClient
 from utils.llm_router import LLMRouter
-from tools.google_auth import GoogleAuthHandler
-from tools.gmail_tool import GmailTool
-from tools.calendar_tool import CalendarTool
-from tools.docs_tool import DocsTool
-from tools.slack_tool import SlackTool
 from tools.sms_tool import SMSTool
 
 # Production OAuth imports
 from starlette.middleware.sessions import SessionMiddleware
 from auth import init_jwt_handler
-from auth.dependencies import get_optional_user
+from auth.dependencies import get_optional_user, get_current_user
 from routes.auth_routes import router as auth_router
 from models.user import User
 from services.user_service import UserService
@@ -648,7 +643,7 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
         raise
 
 
-async def execute_gmail_action(gmail_tool: GmailTool, tool_action: ToolAction) -> str:
+async def execute_gmail_action(gmail_tool, tool_action: ToolAction) -> str:
     """Execute Gmail-specific actions."""
     action = tool_action.action
     params = tool_action.parameters
@@ -706,7 +701,7 @@ async def execute_gmail_action(gmail_tool: GmailTool, tool_action: ToolAction) -
         raise ValueError(f"Unknown Gmail action: {action}")
 
 
-async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: ToolAction) -> str:
+async def execute_calendar_action(calendar_tool, tool_action: ToolAction) -> str:
     """Execute Calendar-specific actions."""
     action = tool_action.action
     params = tool_action.parameters
@@ -864,7 +859,7 @@ async def execute_calendar_action(calendar_tool: CalendarTool, tool_action: Tool
         raise ValueError(f"Unknown Calendar action: {action}")
 
 
-async def execute_docs_action(docs_tool: DocsTool, tool_action: ToolAction) -> str:
+async def execute_docs_action(docs_tool, tool_action: ToolAction, user: Optional[User] = None) -> str:
     """Execute Docs-specific actions - PDF/Doc generation."""
     action = tool_action.action
     params = tool_action.parameters
@@ -960,12 +955,10 @@ Or copy this link: {download_url}
 💡 Tip: Right-click the link and select "Save As" to download directly."""
         
         return completion_msg
-    
-    else:
         raise ValueError(f"Unknown Docs action: {action}")
 
 
-async def execute_slack_action(slack_tool: SlackTool, tool_action: ToolAction) -> str:
+async def execute_slack_action(slack_tool, tool_action: ToolAction, user: Optional[User] = None) -> str:
     """Execute Slack-specific actions."""
     action = tool_action.action
     params = tool_action.parameters
@@ -1266,6 +1259,240 @@ async def get_user_profile(user_id: str):
         return profile.model_dump()
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ============================================================================
+# MCP (Model Context Protocol) Endpoints
+# ============================================================================
+
+@app.post("/mcp/gmail/list")
+async def mcp_gmail_list_messages(
+    max_results: int = 10,
+    query: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """MCP endpoint to list Gmail messages for authenticated user."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use Gmail MCP features"
+            )
+        
+        # Create credentials and MCP server
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        messages = await mcp_server.gmail_list_messages(max_results, query)
+        
+        return {
+            "success": True,
+            "messages": messages,
+            "count": len(messages)
+        }
+    except Exception as e:
+        logger.error(f"MCP Gmail list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/mcp/gmail/search")
+async def mcp_gmail_search(
+    query: str,
+    max_results: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    """MCP endpoint to search Gmail messages."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use Gmail MCP features"
+            )
+        
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        messages = await mcp_server.gmail_search_messages(query, max_results)
+        
+        return {
+            "success": True,
+            "query": query,
+            "messages": messages,
+            "count": len(messages)
+        }
+    except Exception as e:
+        logger.error(f"MCP Gmail search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/gmail/unread")
+async def mcp_gmail_get_unread(
+    max_results: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    """MCP endpoint to get unread Gmail messages."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use Gmail MCP features"
+            )
+        
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        messages = await mcp_server.gmail_get_unread(max_results)
+        
+        return {
+            "success": True,
+            "messages": messages,
+            "count": len(messages)
+        }
+    except Exception as e:
+        logger.error(f"MCP Gmail unread error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/calendar/today")
+async def mcp_calendar_today(
+    current_user: User = Depends(get_current_user)
+):
+    """MCP endpoint to get today's calendar events."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use Calendar MCP features"
+            )
+        
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        events = await mcp_server.calendar_get_today_events()
+        
+        return {
+            "success": True,
+            "events": events,
+            "count": len(events)
+        }
+    except Exception as e:
+        logger.error(f"MCP Calendar today error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/calendar/week")
+async def mcp_calendar_week(
+    current_user: User = Depends(get_current_user)
+):
+    """MCP endpoint to get this week's calendar events."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use Calendar MCP features"
+            )
+        
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        events = await mcp_server.calendar_get_week_events()
+        
+        return {
+            "success": True,
+            "events": events,
+            "count": len(events)
+        }
+    except Exception as e:
+        logger.error(f"MCP Calendar week error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/mcp/methods")
+async def mcp_get_available_methods(
+    current_user: User = Depends(get_current_user)
+):
+    """Get list of available MCP methods."""
+    try:
+        if not current_user.google_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please sign in with Google to use MCP features"
+            )
+        
+        from google.oauth2.credentials import Credentials
+        from mcp.google_mcp_server import GoogleMCPServer
+        
+        creds = Credentials(
+            token=current_user.google_tokens.get('access_token'),
+            refresh_token=current_user.google_tokens.get('refresh_token'),
+            token_uri=current_user.google_tokens.get('token_uri'),
+            client_id=current_user.google_tokens.get('client_id'),
+            client_secret=current_user.google_tokens.get('client_secret'),
+            scopes=current_user.google_tokens.get('scopes')
+        )
+        
+        mcp_server = GoogleMCPServer(creds)
+        methods = mcp_server.get_available_methods()
+        
+        return {
+            "success": True,
+            "methods": methods,
+            "count": len(methods)
+        }
+    except Exception as e:
+        logger.error(f"MCP methods error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

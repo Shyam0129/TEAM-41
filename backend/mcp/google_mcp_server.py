@@ -1,40 +1,32 @@
-"""MCP Server for Gmail and Calendar integration.
+"""MCP Server for Gmail and Calendar integration with multi-user OAuth support.
 
 This module provides MCP (Model Context Protocol) server functionality
-for real-time Gmail and Calendar operations.
+for real-time Gmail and Calendar operations with per-user authentication.
 """
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from tools.google_auth import GoogleAuthHandler
-from tools.gmail_tool import GmailTool
-from tools.calendar_tool import CalendarTool
+from google.oauth2.credentials import Credentials
+from tools.gmail_tool_v2 import GmailToolV2
+from tools.calendar_tool_v2 import CalendarToolV2
 
 logger = logging.getLogger(__name__)
 
 
 class GoogleMCPServer:
-    """MCP Server for Google services (Gmail and Calendar)."""
+    """MCP Server for Google services with per-user OAuth support."""
     
-    def __init__(
-        self,
-        credentials_file: str = "credentials.json",
-        token_file: str = "token.json"
-    ):
+    def __init__(self, credentials: Credentials):
         """
-        Initialize Google MCP Server.
+        Initialize Google MCP Server with user credentials.
         
         Args:
-            credentials_file: Path to Google OAuth credentials
-            token_file: Path to store/load OAuth tokens
+            credentials: Google OAuth2 credentials for the user
         """
-        self.auth_handler = GoogleAuthHandler(
-            credentials_file=credentials_file,
-            token_file=token_file
-        )
-        self.gmail_tool = GmailTool(self.auth_handler)
-        self.calendar_tool = CalendarTool(self.auth_handler)
+        self.credentials = credentials
+        self.gmail_tool = GmailToolV2(credentials)
+        self.calendar_tool = CalendarToolV2(credentials)
         self.watch_active = False
         self.gmail_watch_info = None
         self.calendar_watch_info = None
@@ -61,10 +53,10 @@ class GoogleMCPServer:
                 max_results=max_results,
                 query=query
             )
-            logger.info(f"Listed {len(messages)} Gmail messages")
+            logger.info(f"[MCP] Listed {len(messages)} Gmail messages")
             return messages
         except Exception as e:
-            logger.error(f"Failed to list Gmail messages: {e}")
+            logger.error(f"[MCP] Failed to list Gmail messages: {e}")
             raise
     
     async def gmail_get_message(self, message_id: str) -> Dict[str, Any]:
@@ -80,10 +72,10 @@ class GoogleMCPServer:
         try:
             message = self.gmail_tool.get_message(message_id)
             parsed = self.gmail_tool.parse_message(message)
-            logger.info(f"Retrieved Gmail message: {message_id}")
+            logger.info(f"[MCP] Retrieved Gmail message: {message_id}")
             return parsed
         except Exception as e:
-            logger.error(f"Failed to get Gmail message: {e}")
+            logger.error(f"[MCP] Failed to get Gmail message: {e}")
             raise
     
     async def gmail_search_messages(
@@ -106,10 +98,10 @@ class GoogleMCPServer:
                 query=query,
                 max_results=max_results
             )
-            logger.info(f"Found {len(messages)} messages matching '{query}'")
+            logger.info(f"[MCP] Found {len(messages)} messages matching '{query}'")
             return messages
         except Exception as e:
-            logger.error(f"Failed to search Gmail messages: {e}")
+            logger.error(f"[MCP] Failed to search Gmail messages: {e}")
             raise
     
     async def gmail_get_unread(self, max_results: int = 10) -> List[Dict[str, Any]]:
@@ -124,10 +116,10 @@ class GoogleMCPServer:
         """
         try:
             messages = self.gmail_tool.get_unread_messages(max_results=max_results)
-            logger.info(f"Retrieved {len(messages)} unread messages")
+            logger.info(f"[MCP] Retrieved {len(messages)} unread messages")
             return messages
         except Exception as e:
-            logger.error(f"Failed to get unread messages: {e}")
+            logger.error(f"[MCP] Failed to get unread messages: {e}")
             raise
     
     async def gmail_send_email(
@@ -159,10 +151,10 @@ class GoogleMCPServer:
                 cc=cc,
                 bcc=bcc
             )
-            logger.info(f"Sent email to {to}")
+            logger.info(f"[MCP] Sent email to {to}")
             return result
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(f"[MCP] Failed to send email: {e}")
             raise
     
     async def gmail_mark_as_read(self, message_id: str) -> Dict[str, Any]:
@@ -177,10 +169,10 @@ class GoogleMCPServer:
         """
         try:
             result = self.gmail_tool.mark_as_read(message_id)
-            logger.info(f"Marked message {message_id} as read")
+            logger.info(f"[MCP] Marked message {message_id} as read")
             return result
         except Exception as e:
-            logger.error(f"Failed to mark message as read: {e}")
+            logger.error(f"[MCP] Failed to mark message as read: {e}")
             raise
     
     async def gmail_start_watch(
@@ -189,7 +181,7 @@ class GoogleMCPServer:
         label_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Start watching Gmail for changes.
+        Start watching Gmail for changes (requires Google Cloud Pub/Sub setup).
         
         Args:
             topic_name: Google Cloud Pub/Sub topic name
@@ -204,10 +196,10 @@ class GoogleMCPServer:
                 label_ids=label_ids
             )
             self.watch_active = True
-            logger.info("Started watching Gmail")
+            logger.info("[MCP] Started watching Gmail")
             return self.gmail_watch_info
         except Exception as e:
-            logger.error(f"Failed to start Gmail watch: {e}")
+            logger.error(f"[MCP] Failed to start Gmail watch: {e}")
             raise
     
     async def gmail_stop_watch(self) -> None:
@@ -216,9 +208,9 @@ class GoogleMCPServer:
             self.gmail_tool.stop_watch()
             self.watch_active = False
             self.gmail_watch_info = None
-            logger.info("Stopped watching Gmail")
+            logger.info("[MCP] Stopped watching Gmail")
         except Exception as e:
-            logger.error(f"Failed to stop Gmail watch: {e}")
+            logger.error(f"[MCP] Failed to stop Gmail watch: {e}")
             raise
     
     # Calendar MCP Methods
@@ -246,10 +238,10 @@ class GoogleMCPServer:
                 end_date=end_date,
                 max_results=max_results
             )
-            logger.info(f"Listed {len(events)} calendar events")
+            logger.info(f"[MCP] Listed {len(events)} calendar events")
             return events
         except Exception as e:
-            logger.error(f"Failed to list calendar events: {e}")
+            logger.error(f"[MCP] Failed to list calendar events: {e}")
             raise
     
     async def calendar_get_event(self, event_id: str) -> Dict[str, Any]:
@@ -264,10 +256,10 @@ class GoogleMCPServer:
         """
         try:
             event = self.calendar_tool.get_event(event_id)
-            logger.info(f"Retrieved calendar event: {event_id}")
+            logger.info(f"[MCP] Retrieved calendar event: {event_id}")
             return event
         except Exception as e:
-            logger.error(f"Failed to get calendar event: {e}")
+            logger.error(f"[MCP] Failed to get calendar event: {e}")
             raise
     
     async def calendar_create_event(
@@ -302,10 +294,10 @@ class GoogleMCPServer:
                 location=location,
                 attendees=attendees
             )
-            logger.info(f"Created calendar event: {summary}")
+            logger.info(f"[MCP] Created calendar event: {summary}")
             return event
         except Exception as e:
-            logger.error(f"Failed to create calendar event: {e}")
+            logger.error(f"[MCP] Failed to create calendar event: {e}")
             raise
     
     async def calendar_update_event(
@@ -340,10 +332,10 @@ class GoogleMCPServer:
                 description=description,
                 location=location
             )
-            logger.info(f"Updated calendar event: {event_id}")
+            logger.info(f"[MCP] Updated calendar event: {event_id}")
             return event
         except Exception as e:
-            logger.error(f"Failed to update calendar event: {e}")
+            logger.error(f"[MCP] Failed to update calendar event: {e}")
             raise
     
     async def calendar_delete_event(self, event_id: str) -> None:
@@ -355,9 +347,9 @@ class GoogleMCPServer:
         """
         try:
             self.calendar_tool.delete_event(event_id)
-            logger.info(f"Deleted calendar event: {event_id}")
+            logger.info(f"[MCP] Deleted calendar event: {event_id}")
         except Exception as e:
-            logger.error(f"Failed to delete calendar event: {e}")
+            logger.error(f"[MCP] Failed to delete calendar event: {e}")
             raise
     
     async def calendar_get_today_events(self) -> List[Dict[str, Any]]:
@@ -369,10 +361,10 @@ class GoogleMCPServer:
         """
         try:
             events = self.calendar_tool.get_events_today()
-            logger.info(f"Retrieved {len(events)} events for today")
+            logger.info(f"[MCP] Retrieved {len(events)} events for today")
             return events
         except Exception as e:
-            logger.error(f"Failed to get today's events: {e}")
+            logger.error(f"[MCP] Failed to get today's events: {e}")
             raise
     
     async def calendar_get_week_events(self) -> List[Dict[str, Any]]:
@@ -384,10 +376,10 @@ class GoogleMCPServer:
         """
         try:
             events = self.calendar_tool.get_events_this_week()
-            logger.info(f"Retrieved {len(events)} events for this week")
+            logger.info(f"[MCP] Retrieved {len(events)} events for this week")
             return events
         except Exception as e:
-            logger.error(f"Failed to get week's events: {e}")
+            logger.error(f"[MCP] Failed to get week's events: {e}")
             raise
     
     async def calendar_start_watch(
@@ -413,10 +405,10 @@ class GoogleMCPServer:
                 webhook_url=webhook_url,
                 ttl=ttl
             )
-            logger.info("Started watching calendar")
+            logger.info("[MCP] Started watching calendar")
             return self.calendar_watch_info
         except Exception as e:
-            logger.error(f"Failed to start calendar watch: {e}")
+            logger.error(f"[MCP] Failed to start calendar watch: {e}")
             raise
     
     async def calendar_stop_watch(
@@ -434,9 +426,9 @@ class GoogleMCPServer:
         try:
             self.calendar_tool.stop_watch(channel_id, resource_id)
             self.calendar_watch_info = None
-            logger.info("Stopped watching calendar")
+            logger.info("[MCP] Stopped watching calendar")
         except Exception as e:
-            logger.error(f"Failed to stop calendar watch: {e}")
+            logger.error(f"[MCP] Failed to stop calendar watch: {e}")
             raise
     
     def get_available_methods(self) -> List[str]:

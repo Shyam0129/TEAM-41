@@ -42,21 +42,26 @@ class UserPreferences(BaseModel):
 
 
 class User(BaseModel):
-    """User model"""
+    """User model with support for both local and OAuth authentication"""
     
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     user_id: str = Field(..., description="Internal user ID")
     email: EmailStr = Field(..., description="User email address")
     name: str = Field(..., description="User full name")
+    username: Optional[str] = Field(None, description="Username (for local auth)")
     picture: Optional[str] = Field(None, description="User profile picture URL")
     
-    # Google OAuth
-    google_id: str = Field(..., description="Google user ID")
+    # Authentication
+    password_hash: Optional[str] = Field(None, description="Hashed password (for local auth)")
+    auth_provider: str = Field(default="local", description="Auth provider: 'local' or 'google'")
+    
+    # Google OAuth (optional - only for OAuth users)
+    google_id: Optional[str] = Field(None, description="Google user ID")
     google_tokens: Optional[Dict[str, Any]] = Field(None, description="Google OAuth tokens")
     
     # Account status
     is_active: bool = Field(default=True, description="Whether user account is active")
-    is_verified: bool = Field(default=True, description="Whether user email is verified")
+    is_verified: bool = Field(default=False, description="Whether user email is verified")
     is_admin: bool = Field(default=False, description="Whether user has admin privileges")
     
     # Timestamps
@@ -89,7 +94,7 @@ class User(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """Model for creating a new user"""
+    """Model for creating a new user via OAuth"""
     google_id: str
     email: EmailStr
     name: str
@@ -97,9 +102,24 @@ class UserCreate(BaseModel):
     google_tokens: Dict[str, Any]
 
 
+class UserRegister(BaseModel):
+    """Model for user registration with email/password"""
+    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=30)
+    password: str = Field(..., min_length=8, max_length=100)
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class UserLogin(BaseModel):
+    """Model for user login"""
+    email: EmailStr
+    password: str
+
+
 class UserUpdate(BaseModel):
     """Model for updating user information"""
     name: Optional[str] = None
+    username: Optional[str] = None
     picture: Optional[str] = None
     preferences: Optional[UserPreferences] = None
     is_active: Optional[bool] = None
@@ -110,7 +130,9 @@ class UserResponse(BaseModel):
     user_id: str
     email: EmailStr
     name: str
+    username: Optional[str] = None
     picture: Optional[str] = None
+    auth_provider: str
     is_active: bool
     is_verified: bool
     last_login: Optional[datetime] = None
@@ -128,3 +150,8 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int  # seconds
     user: UserResponse
+
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request model"""
+    refresh_token: str

@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     # JWT Settings
     jwt_secret_key: str = "your-jwt-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 30
+    jwt_access_token_expire_minutes: int = 15  # 15 minutes for security
+    jwt_refresh_token_expire_days: int = 7  # 7 days
     
     # Session
     session_secret_key: str = "your-session-secret-key-change-in-production"

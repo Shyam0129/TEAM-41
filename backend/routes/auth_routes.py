@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+# Include local authentication routes (email/password)
+from routes.local_auth_routes import local_auth_router
+router.include_router(local_auth_router)
 
 @router.get("/login")
 async def login(request: Request, redirect_url: Optional[str] = None):
@@ -115,12 +118,12 @@ async def auth_callback(request: Request):
         # Get redirect URL from session or use default
         redirect_url = request.session.pop('redirect_url', settings.frontend_url)
         
-        # Build frontend callback URL with tokens
-        frontend_callback = f"{redirect_url}/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+        # Build frontend URL with tokens (redirect to home, not /auth/callback)
+        frontend_url = f"{redirect_url}?access_token={access_token}&refresh_token={refresh_token}"
         
         logger.info(f"OAuth successful for user: {user.user_id}")
         
-        return RedirectResponse(url=frontend_callback)
+        return RedirectResponse(url=frontend_url)
         
     except Exception as e:
         logger.error(f"OAuth callback error: {e}", exc_info=True)

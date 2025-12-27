@@ -4,6 +4,8 @@ import { InputArea } from './components/InputArea.tsx';
 import { ToolsModal } from './components/ToolsModal.tsx';
 import { MessageContent } from './components/MessageContent.tsx';
 import { ConversationHistory } from './components/ConversationHistory.tsx';
+import { AuthModal } from './components/AuthModal.tsx';
+import { useAuth } from './contexts/AuthContext.tsx';
 import { Message, ModelType } from './types.ts';
 import { INITIAL_SUGGESTIONS } from './constants.tsx';
 import { streamChatResponse } from './services/backendService.ts';
@@ -29,6 +31,7 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  const { isAuthenticated } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeNav, setActiveNav] = useState('chat');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -45,6 +48,10 @@ export default function App() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
 
+  // Auth modal state
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -53,6 +60,47 @@ export default function App() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Handle OAuth callback tokens from URL
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (accessToken) {
+        try {
+          // Store tokens
+          localStorage.setItem('access_token', accessToken);
+          if (refreshToken) {
+            localStorage.setItem('refresh_token', refreshToken);
+          }
+
+          // Fetch user data
+          const response = await fetch('http://localhost:8000/auth/me', {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+
+          if (response.ok) {
+            const userData = await response.json();
+            localStorage.setItem('user', JSON.stringify(userData));
+
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+
+            // Reload to update auth state
+            window.location.reload();
+          }
+        } catch (error) {
+          console.error('OAuth callback error:', error);
+        }
+      }
+    };
+
+    handleOAuthCallback();
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -259,6 +307,14 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-[#0f0f10] text-gray-900 dark:text-gray-100 font-sans overflow-hidden transition-colors duration-300">
 
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialMode={authModalMode}
+      />
+
       <ToolsModal
         isOpen={isToolsModalOpen}
         onClose={() => setIsToolsModalOpen(false)}
@@ -344,42 +400,90 @@ export default function App() {
               Pro
             </button>
 
-            {/* User Profile - Top Right with Dropdown */}
-            <div className="relative" ref={profileRef}>
-              <button
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold shadow-md cursor-pointer hover:opacity-90 transition-opacity ml-1"
-              >
-                JD
-              </button>
+            {/* Auth Section - Top Right */}
+            {!isAuthenticated ? (
+              // Guest User - Show Login/Sign Up buttons
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setAuthModalMode('login');
+                    setIsAuthModalOpen(true);
+                  }}
+                  className="px-4 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                >
+                  Login
+                </button>
+                <button
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    setIsAuthModalOpen(true);
+                  }}
+                  className="px-4 py-1.5 text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Sign Up
+                </button>
+              </div>
+            ) : (
+              // Authenticated User - Show Profile Dropdown
+              <div className="relative" ref={profileRef}>
+                <button
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold shadow-md cursor-pointer hover:opacity-90 transition-opacity ml-1"
+                >
+                  {useAuth().user?.name ? useAuth().user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
+                </button>
 
-              {/* Profile Dropdown */}
-              {isProfileOpen && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-fade-in-up">
-                  <div className="py-1">
-                    <button
-                      onClick={() => {
-                        setIsToolsModalOpen(true);
-                        setIsProfileOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2"
-                    >
-                      <Blocks className="w-4 h-4" />
-                      Tools
-                    </button>
-                    <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2">
-                      <Settings className="w-4 h-4" />
-                      Settings
-                    </button>
-                    <div className="h-px bg-gray-100 dark:bg-white/5 my-1" />
-                    <button className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 flex items-center gap-2">
-                      <LogOut className="w-4 h-4" />
-                      Log out
-                    </button>
+                {/* Profile Dropdown */}
+                {isProfileOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-fade-in-up">
+                    {/* User Info */}
+                    <div className="px-4 py-3 border-b border-gray-100 dark:border-white/5">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                        {useAuth().user?.name || 'User'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {useAuth().user?.email || ''}
+                      </p>
+                      {useAuth().user?.auth_provider && (
+                        <div className="mt-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">
+                            {useAuth().user.auth_provider === 'google' ? '🔵 Google' : '📧 Email'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setIsToolsModalOpen(true);
+                          setIsProfileOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2"
+                      >
+                        <Blocks className="w-4 h-4" />
+                        Tools
+                      </button>
+                      <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2">
+                        <Settings className="w-4 h-4" />
+                        Settings
+                      </button>
+                      <div className="h-px bg-gray-100 dark:bg-white/5 my-1" />
+                      <button
+                        onClick={() => {
+                          useAuth().logout();
+                          setIsProfileOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 flex items-center gap-2"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Log out
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

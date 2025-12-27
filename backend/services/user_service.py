@@ -56,6 +56,7 @@ class UserService:
             "name": user_data.name,
             "picture": user_data.picture,
             "google_tokens": user_data.google_tokens,
+            "auth_provider": "google",  # Set auth provider for OAuth users
             "is_active": True,
             "is_verified": True,
             "is_admin": False,
@@ -229,6 +230,7 @@ class UserService:
                         "name": name,
                         "picture": picture,
                         "google_tokens": google_tokens,
+                        "auth_provider": "google",  # Ensure auth_provider is set
                         "last_login": datetime.utcnow(),
                         "updated_at": datetime.utcnow()
                     }
@@ -326,7 +328,9 @@ class UserService:
             user_id=user.user_id,
             email=user.email,
             name=user.name,
+            username=getattr(user, 'username', None),
             picture=user.picture,
+            auth_provider=getattr(user, 'auth_provider', 'google'),  # Default to 'google' for old users
             is_active=user.is_active,
             is_verified=user.is_verified,
             last_login=user.last_login,
