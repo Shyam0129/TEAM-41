@@ -40,7 +40,7 @@
 
 ---
 
-## ✨ Features
+## Features
 
 ### Core Features
 

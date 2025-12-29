@@ -2,9 +2,9 @@ name: Deploy to AWS EC2
 
 on:
   push:
-    branches: [ main ]
+    branches: [ feature/safe ]
   pull_request:
-    branches: [ main ]
+    branches: [ feature/safe ]
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           
           echo "📦 Pulling latest code..."
           cd ~/TEAM-41
-          git pull origin main
+          git pull origin feature/safe
           
           echo "🔧 Updating backend..."
           cd backend
