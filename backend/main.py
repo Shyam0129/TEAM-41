@@ -627,13 +627,13 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
             slack_tool = SlackTool(settings.slack_bot_token)
             return await execute_slack_action(slack_tool, tool_action)
         
-        elif tool_action.tool_type == ToolType.SMS:
-            sms_tool = SMSTool(
-                account_sid=settings.twilio_account_sid,
-                auth_token=settings.twilio_auth_token,
-                from_number=settings.twilio_phone_number
-            )
-            return await execute_sms_action(sms_tool, tool_action)
+        # elif tool_action.tool_type == ToolType.SMS:
+        #     sms_tool = SMSTool(
+        #         account_sid=settings.twilio_account_sid,
+        #         auth_token=settings.twilio_auth_token,
+        #         from_number=settings.twilio_phone_number
+        #     )
+        #     return await execute_sms_action(sms_tool, tool_action)
         
         else:
             raise ValueError(f"Unknown tool type: {tool_action.tool_type}")
@@ -983,20 +983,20 @@ async def execute_slack_action(slack_tool, tool_action: ToolAction, user: Option
         raise ValueError(f"Unknown Slack action: {action}")
 
 
-async def execute_sms_action(sms_tool: SMSTool, tool_action: ToolAction) -> str:
-    """Execute SMS-specific actions."""
-    action = tool_action.action
-    params = tool_action.parameters
-    
-    if action == "send_sms":
-        result = sms_tool.send_sms(
-            to_number=params.get("to_number"),
-            message=params.get("message")
-        )
-        return f"SMS sent successfully to {params.get('to_number')}"
-    
-    else:
-        raise ValueError(f"Unknown SMS action: {action}")
+# async def execute_sms_action(sms_tool: SMSTool, tool_action: ToolAction) -> str:
+#     """Execute SMS-specific actions."""
+#     action = tool_action.action
+#     params = tool_action.parameters
+#     
+#     if action == "send_sms":
+#         result = sms_tool.send_sms(
+#             to_number=params.get("to_number"),
+#             message=params.get("message")
+#         )
+#         return f"SMS sent successfully to {params.get('to_number')}"
+#     
+#     else:
+#         raise ValueError(f"Unknown SMS action: {action}")
 
 
 # ============================================================================
