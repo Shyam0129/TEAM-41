@@ -23,7 +23,7 @@ from utils.conversation_manager import ConversationManager
 from utils.websocket_handler import ConnectionManager, WebSocketChatHandler
 from utils.gemini_client import GeminiClient
 from utils.llm_router import LLMRouter
-from tools.sms_tool import SMSTool
+# from tools.sms_tool import SMSTool
 
 # Production OAuth imports
 from starlette.middleware.sessions import SessionMiddleware
