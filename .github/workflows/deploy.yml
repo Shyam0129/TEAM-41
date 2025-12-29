@@ -57,15 +57,15 @@ jobs:
     - name: 🏥 Health Check
       run: |
         echo "⏳ Waiting for services to start..."
-        sleep 15
+        sleep 10
         
-        echo "🔍 Checking backend health..."
-        response=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}/health)
+        echo "🔍 Checking backend health (Internal)..."
+        ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} "curl -f -s http://localhost:8000/health"
         
-        if [ $response -eq 200 ]; then
+        if [ $? -eq 0 ]; then
           echo "✅ Health check passed! Backend is healthy."
         else
-          echo "❌ Health check failed! Status code: $response"
+          echo "❌ Health check failed!"
           exit 1
         fi
 
