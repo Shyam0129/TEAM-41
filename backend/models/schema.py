@@ -27,6 +27,7 @@ class UserRequest(BaseModel):
     user_id: str = Field(..., description="Unique user identifier")
     message: str = Field(..., description="User message/query")
     session_id: Optional[str] = Field(None, description="Session identifier for conversation tracking")
+    conversation_id: Optional[str] = Field(None, description="Conversation identifier for message persistence")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
 
 

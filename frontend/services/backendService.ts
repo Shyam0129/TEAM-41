@@ -7,6 +7,7 @@ export interface UserRequest {
     user_id: string;
     message: string;
     session_id?: string;
+    conversation_id?: string;  // NEW: For message persistence
     metadata?: Record<string, any>;
 }
 
@@ -33,6 +34,7 @@ export const streamChatResponse = async (
     newMessage: string,
     userId: string,
     sessionId: string | null,
+    conversationId: string | null,  // NEW: For message persistence
     onChunk: (text: string) => void,
     abortSignal?: AbortSignal
 ): Promise<AgentResponse> => {
@@ -41,6 +43,7 @@ export const streamChatResponse = async (
             user_id: userId,
             message: newMessage,
             session_id: sessionId || undefined,
+            conversation_id: conversationId || undefined,  // NEW: Send to backend
             metadata: {
                 history_length: history.length,
             },

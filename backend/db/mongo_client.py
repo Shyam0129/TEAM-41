@@ -37,7 +37,7 @@ class MongoDBClient:
     
     async def disconnect(self):
         """Close MongoDB connection."""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             logger.info("MongoDB connection closed")
     
@@ -51,7 +51,7 @@ class MongoDBClient:
         Returns:
             MongoDB collection object
         """
-        if not self.db:
+        if self.db is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self.db[collection_name]
     

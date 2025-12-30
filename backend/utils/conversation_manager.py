@@ -12,6 +12,7 @@ from models.conversation import (
     UserSession,
     UserProfile
 )
+from models.message import Message
 from db.mongo_client import MongoDBClient
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class ConversationManager:
         """Initialize conversation manager."""
         self.db = mongodb_client
         self.conversations_collection = "conversations"
+        self.messages_collection = "messages"  # NEW: Separate messages collection
         self.sessions_collection = "user_sessions"
         self.activity_logs_collection = "activity_logs"
         self.user_profiles_collection = "user_profiles"
@@ -96,6 +98,85 @@ class ConversationManager:
         
         logger.info(f"Added {role} message to conversation {conversation_id}")
         return message
+
+    # ============================================================================
+    # NEW: Separate Message Storage (Scalable Architecture)
+    # ============================================================================
+    
+    async def add_message_to_db(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        tokens_used: Optional[int] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Message:
+        """
+        Save individual message to messages collection (separate from conversation).
+        
+        This is the NEW scalable approach - messages are stored separately
+        instead of being embedded in the conversation document.
+        """
+        message_id = f"msg_{uuid.uuid4().hex[:12]}"
+        
+        # Get conversation to extract user_id
+        conversation = await self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        
+        message = Message(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            user_id=conversation.user_id,
+            role=role,
+            content=content,
+            tokens_used=tokens_used,
+            tool_calls=tool_calls,
+            metadata=metadata or {}
+        )
+        
+        # Insert into messages collection
+        await self.db.insert_one(
+            self.messages_collection,
+            message.model_dump()
+        )
+        
+        # Update conversation metadata
+        await self.db.update_one(
+            self.conversations_collection,
+            {"conversation_id": conversation_id},
+            {
+                "$set": {"updated_at": datetime.utcnow()},
+                "$inc": {"total_tokens": tokens_used or 0}
+            }
+        )
+        
+        logger.info(f"💬 SAVED MESSAGE | conv: {conversation_id} | role: {role} | length: {len(content)} | tokens: {tokens_used or 0}")
+        return message
+    
+    async def get_messages(
+        self,
+        conversation_id: str,
+        limit: Optional[int] = None
+    ) -> List[Message]:
+        """
+        Retrieve all messages for a conversation from messages collection.
+        
+        Returns messages sorted by timestamp (oldest first).
+        """
+        query = {"conversation_id": conversation_id}
+        
+        cursor = self.db.db[self.messages_collection].find(query).sort("timestamp", 1)
+        if limit:
+            cursor = cursor.limit(limit)
+        
+        messages = []
+        async for doc in cursor:
+            messages.append(Message(**doc))
+        
+        logger.info(f"📥 RETRIEVED MESSAGES | conv: {conversation_id} | count: {len(messages)}")
+        return messages
 
     async def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Get a conversation by ID."""

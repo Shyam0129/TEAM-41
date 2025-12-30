@@ -5,8 +5,8 @@ import { ToolsModal } from './components/ToolsModal.tsx';
 import { MessageContent } from './components/MessageContent.tsx';
 import { ConversationHistory } from './components/ConversationHistory.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
-import { useAuth } from './contexts/AuthContext.tsx';
-import { Message, ModelType } from './types.ts';
+import { AgentsModal } from './components/AgentsModal.tsx';
+
 import { INITIAL_SUGGESTIONS } from './constants.tsx';
 import { streamChatResponse } from './services/backendService.ts';
 import {
@@ -29,9 +29,13 @@ import {
   ChevronDown,
   Check
 } from 'lucide-react';
+import { useAuth } from './contexts/AuthContext.tsx';
+import { Message, ModelType } from './types.ts';
+import toast from 'react-hot-toast';
+import { logger } from './utils/logger';
 
 export default function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeNav, setActiveNav] = useState('chat');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -41,10 +45,14 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
+  const [isAgentsModalOpen, setIsAgentsModalOpen] = useState(false);
   const [currentModel, setCurrentModel] = useState('Gemini 3 Pro');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [userId] = useState('user_' + Math.random().toString(36).substr(2, 9));
+
+  // FIX: Use real authenticated user ID instead of random
+  const userId = user?.user_id || 'anonymous';
+
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
 
@@ -184,14 +192,22 @@ export default function App() {
     // Create conversation if this is the first message
     if (!currentConversationId && !sessionId) {
       try {
+        logger.log("🆕 Creating new conversation", { userId });
+
         const newSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
         setSessionId(newSessionId);
 
         const conversation = await createConversation(userId, newSessionId, text);
         setCurrentConversationId(conversation.conversation_id);
         setConversationTitle(conversation.title || null);
+
+        logger.success("✅ CONVERSATION CREATED", {
+          conversationId: conversation.conversation_id,
+          title: conversation.title
+        });
       } catch (error) {
-        console.error('Error creating conversation:', error);
+        logger.error("❌ CONVERSATION CREATE FAILED", error);
+        // Continue anyway - chat can work without persistence
       }
     }
 
@@ -205,11 +221,14 @@ export default function App() {
     }]);
 
     try {
+      logger.log("🔵 Streaming AI response", { conversationId: currentConversationId });
+
       const response = await streamChatResponse(
         messages,
         text,
         userId,
         sessionId,
+        currentConversationId,  // NEW: Pass conversation_id for message persistence
         (chunk) => {
           setMessages(prev => prev.map(msg =>
             msg.id === botMsgId
@@ -264,12 +283,16 @@ export default function App() {
   };
 
   const handleSelectConversation = async (conversationId: string) => {
+    logger.log("🔵 LOAD CONVERSATION", { conversationId });
+
     try {
       const { messages: convMessages } = await getConversationMessages(conversationId);
 
+      logger.log("📥 MESSAGES LOADED", { count: convMessages.length });
+
       // Convert to Message format
-      const formattedMessages: Message[] = convMessages.map((msg: ConversationMessage) => ({
-        id: msg.id,
+      const formattedMessages: Message[] = convMessages.map((msg: any) => ({
+        id: msg.message_id,  // FIX: Use message_id from database
         role: msg.role === 'assistant' ? 'model' : msg.role as 'user' | 'model',
         content: msg.content,
         timestamp: new Date(msg.timestamp)
@@ -281,8 +304,11 @@ export default function App() {
 
       // Close sidebar on mobile
       if (window.innerWidth < 768) setIsSidebarOpen(false);
+
+      logger.success("✅ CONVERSATION LOADED", { messageCount: formattedMessages.length });
     } catch (error) {
-      console.error('Error loading conversation:', error);
+      logger.error("❌ LOAD CONVERSATION FAILED", { conversationId, error });
+      toast.error("Failed to load conversation");
     }
   };
 
@@ -320,6 +346,11 @@ export default function App() {
         onClose={() => setIsToolsModalOpen(false)}
       />
 
+      <AgentsModal
+        isOpen={isAgentsModalOpen}
+        onClose={() => setIsAgentsModalOpen(false)}
+      />
+
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -352,14 +383,22 @@ export default function App() {
         {/* Top Navigation Bar */}
         <div className="h-16 border-b border-gray-200 dark:border-white/5 flex items-center justify-between px-6 bg-white/80 dark:bg-[#0f0f10]/80 backdrop-blur-md z-30 sticky top-0 transition-colors">
           <div className="flex items-center gap-2">
+            {/* Mobile Menu Button */}
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="md:hidden p-2 -ml-2 mr-2 text-gray-700 dark:text-gray-300"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
             {/* Model Selector Dropdown */}
             <div className="relative" ref={modelDropdownRef}>
               <button
                 onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1c1c1e] transition-colors group"
               >
-                <span className="text-sm font-semibold text-gray-900 dark:text-white">{currentModel}</span>
-                <ChevronDown className={`w-3 h-3 text-gray-500 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
+                <span className="text-lg font-semibold text-gray-900 dark:text-white">{currentModel}</span>
+                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {isModelDropdownOpen && (
                 <div className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-fade-in-up">
@@ -383,7 +422,27 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* New Tools Button on Navbar */}
+            <button
+              onClick={() => setIsToolsModalOpen(true)}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1c1c1e] rounded-lg transition-colors border border-transparent hover:border-gray-200 dark:hover:border-white/10"
+              title="Tools"
+            >
+              <Blocks className="w-4 h-4" />
+              <span className="hidden md:inline">Tools</span>
+            </button>
+
+            {/* Agents Button - Future Feature */}
+            <button
+              onClick={() => setIsAgentsModalOpen(true)}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1c1c1e] rounded-lg transition-colors border border-transparent hover:border-gray-200 dark:hover:border-white/10"
+              title="Build Agents"
+            >
+              <Blocks className="w-4 h-4" /> {/* Using Blocks as placeholder for Agent icon if generic, or Bot icon */}
+              <span className="hidden md:inline">Agents</span>
+            </button>
+
             <button
               onClick={toggleTheme}
               className="p-2 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-[#1c1c1e] rounded-lg transition-colors"
@@ -396,35 +455,30 @@ export default function App() {
               <Share className="w-3.5 h-3.5" />
               Export
             </button>
-            <button className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg hover:opacity-90 transition-opacity">
-              Pro
-            </button>
 
-            {/* Auth Section - Top Right */}
+            {/* Auth Section */}
             {!isAuthenticated ? (
-              // Guest User - Show Login/Sign Up buttons
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     setAuthModalMode('login');
                     setIsAuthModalOpen(true);
                   }}
-                  className="px-4 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
                 >
-                  Login
+                  Log in
                 </button>
                 <button
                   onClick={() => {
                     setAuthModalMode('register');
                     setIsAuthModalOpen(true);
                   }}
-                  className="px-4 py-1.5 text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg hover:opacity-90 transition-opacity"
+                  className="px-3 py-1.5 text-sm font-bold text-white bg-black dark:bg-white dark:text-black rounded-lg hover:opacity-90 transition-opacity"
                 >
-                  Sign Up
+                  Sign up
                 </button>
               </div>
             ) : (
-              // Authenticated User - Show Profile Dropdown
               <div className="relative" ref={profileRef}>
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -433,10 +487,8 @@ export default function App() {
                   {useAuth().user?.name ? useAuth().user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
                 </button>
 
-                {/* Profile Dropdown */}
                 {isProfileOpen && (
                   <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1c1c1e] border border-gray-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-fade-in-up">
-                    {/* User Info */}
                     <div className="px-4 py-3 border-b border-gray-100 dark:border-white/5">
                       <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
                         {useAuth().user?.name || 'User'}
@@ -444,26 +496,9 @@ export default function App() {
                       <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                         {useAuth().user?.email || ''}
                       </p>
-                      {useAuth().user?.auth_provider && (
-                        <div className="mt-2">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">
-                            {useAuth().user.auth_provider === 'google' ? '🔵 Google' : '📧 Email'}
-                          </span>
-                        </div>
-                      )}
                     </div>
 
                     <div className="py-1">
-                      <button
-                        onClick={() => {
-                          setIsToolsModalOpen(true);
-                          setIsProfileOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2"
-                      >
-                        <Blocks className="w-4 h-4" />
-                        Tools
-                      </button>
                       <button className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center gap-2">
                         <Settings className="w-4 h-4" />
                         Settings
@@ -487,114 +522,85 @@ export default function App() {
           </div>
         </div>
 
-        {/* Scrollable Chat Area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-
-          {isWelcomeScreen ? (
-            <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-8">
-              {/* Header */}
-              <div className="text-center mb-12 space-y-4 animate-fade-in-up">
-                <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-white tracking-tight">
-                  Welcome to Rexie.
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400 max-w-lg mx-auto text-lg font-light">
-                  Your intelligent assistant for Gmail, Slack, Calendar, Docs, and more
-                </p>
+        {/* Chat Content Area - Responsive Flex Column */}
+        <div className="flex-1 overflow-hidden relative flex flex-col">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 scroll-smooth">
+            {isWelcomeScreen ? (
+              <div className="h-full flex flex-col items-center justify-center -mt-10">
+                <div className="bg-white dark:bg-[#1c1c1e] p-4 rounded-full shadow-sm mb-6">
+                  <Zap className="w-8 h-8 text-black dark:text-white" />
+                </div>
+                <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-8">
+                  How can I help you today?
+                </h2>
               </div>
-
-              {/* Centered Input Area */}
-              <div className="w-full max-w-3xl px-4">
-                <InputArea
-                  onSend={handleSendMessage}
-                  onStop={handleStopGeneration}
-                  disabled={isLoading}
-                  value={inputValue}
-                  isGenerating={isLoading}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <div className="w-full max-w-3xl p-4 sm:p-6 pb-56 space-y-6">
+            ) : (
+              <div className="w-full max-w-3xl mx-auto space-y-6">
                 {messages.map((msg, idx) => (
                   <div
                     key={msg.id}
-                    className={`flex gap-4 group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     {msg.role === 'model' && (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-md">
-                        <Zap className="w-4 h-4 text-white" />
+                      <div className="w-8 h-8 rounded-full border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Zap className="w-5 h-5 text-black dark:text-white" />
                       </div>
                     )}
 
-                    {msg.role === 'user' ? (
-                      <div className="flex flex-col items-end max-w-[85%]">
-                        <div className="bg-gray-200 dark:bg-[#2c2c2e] text-gray-900 dark:text-white rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm">
-                          {msg.content}
-                        </div>
-                        {/* Edit and Retry Options */}
-                        <div className="flex items-center gap-2 mt-1 mr-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <button
-                            onClick={() => handleEdit(msg.content)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
-                            title="Edit"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleRetry(msg.content)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all"
-                            title="Retry"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        className={`
-                         max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm
-                         bg-white dark:bg-[#1c1c1e] text-gray-800 dark:text-gray-200 border border-gray-100 dark:border-white/5
-                         ${msg.isError ? 'border-red-500/50 bg-red-50 dark:bg-red-500/10' : ''}
-                       `}
-                      >
-                        <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <div className={`
+                    max-w-[85%] sm:max-w-[75%]
+                    ${msg.role === 'user'
+                        ? 'bg-gray-100 dark:bg-[#2c2c2e] text-gray-900 dark:text-white px-5 py-3 rounded-[20px] rounded-tr-sm'
+                        : 'text-gray-900 dark:text-white px-0 py-1' // AI messages have no bubble bg, like ChatGPT
+                      }
+                  `}>
+                      {msg.role === 'user' ? (
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                      ) : (
+                        <div className="prose prose-sm max-w-none dark:prose-invert leading-relaxed">
                           <MessageContent content={msg.content} />
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {msg.role === 'user' && (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-1 text-xs font-bold text-white shadow-md">
-                        JD
-                      </div>
-                    )}
+                      {msg.isError && (
+                        <div className="mt-2 text-xs text-red-500 bg-red-50 dark:bg-red-500/10 p-2 rounded">
+                          Message sent failed. Please try again.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
                   <div className="flex gap-4">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-1 animate-pulse shadow-md">
-                      <Zap className="w-4 h-4 text-white" />
+                    <div className="w-8 h-8 rounded-full border border-gray-200 dark:border-white/10 bg-white dark:bg-transparent flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Zap className="w-5 h-5 text-black dark:text-white animate-pulse" />
                     </div>
                     <div className="flex items-center gap-1 mt-3">
-                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-75"></div>
-                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce delay-150"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-bounce delay-75"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-600 rounded-full animate-bounce delay-150"></div>
                     </div>
                   </div>
                 )}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} className="h-4" />
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* Bottom Input Area Container - Fixed and Centered - Only show when not on welcome screen */}
-        {!isWelcomeScreen && (
-          <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-gray-50 via-gray-50 dark:from-[#0f0f10] dark:via-[#0f0f10] to-transparent pt-12 pb-6 px-4 z-20 transition-colors min-h-[180px]">
-            <div className="w-full max-w-3xl px-4">
+          {/* Persistent Input Area at Bottom */}
+          <div className="w-full bg-white dark:bg-[#0f0f10] border-t border-transparent dark:border-white/5 p-4 pb-6">
+            <div className="max-w-3xl mx-auto">
+              {/* Only show "Login first" warning if trying to type? optional, handled in handleSendMessage */}
               <InputArea
-                onSend={handleSendMessage}
+                onSend={(text) => {
+                  if (!isAuthenticated) {
+                    toast.error("Please log in to chat", { id: 'login-required', icon: '🔒' });
+                    setAuthModalMode('login');
+                    setIsAuthModalOpen(true);
+                    return;
+                  }
+                  handleSendMessage(text);
+                }}
                 onStop={handleStopGeneration}
                 disabled={isLoading}
                 value={inputValue}
@@ -602,7 +608,7 @@ export default function App() {
               />
             </div>
           </div>
-        )}
+        </div>
 
       </div>
     </div>

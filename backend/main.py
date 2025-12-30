@@ -184,6 +184,9 @@ async def download_file(filename: str):
 async def chat(request: UserRequest, current_user: Optional[User] = Depends(get_optional_user)):
     try:
         session_id = request.session_id or str(uuid.uuid4())
+        conversation_id = request.conversation_id  # Get from request
+        
+        logger.info(f"🔵 CHAT START | user: {request.user_id} | session: {session_id} | conv: {conversation_id}")
 
         state = await state_manager.get_state(session_id)
 
@@ -193,6 +196,20 @@ async def chat(request: UserRequest, current_user: Optional[User] = Depends(get_
                 user_id=request.user_id,
                 status=ConversationStatus.PENDING
             )
+        
+        # 💬 SAVE USER MESSAGE TO DATABASE
+        if conversation_id:
+            try:
+                await conversation_manager.add_message_to_db(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=request.message,
+                    tokens_used=0  # User messages don't consume tokens
+                )
+                logger.info(f"✅ USER MESSAGE SAVED | conv: {conversation_id}")
+            except Exception as e:
+                logger.error(f"❌ FAILED TO SAVE USER MESSAGE | conv: {conversation_id} | error: {e}", exc_info=True)
+                # Continue anyway - chat can work without persistence
 
         # 🔥 CONFIRMATION HANDLER
         if state.status == ConversationStatus.AWAITING_CONFIRMATION:
@@ -435,9 +452,24 @@ Would you like to:
             })
 
             await state_manager.save_state(state)
+            
+            # 🤖 SAVE AI MESSAGE TO DATABASE
+            ai_response = f"I've completed the action: {result}"
+            if conversation_id:
+                try:
+                    await conversation_manager.add_message_to_db(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=ai_response,
+                        tokens_used=0,  # Tool actions don't use LLM tokens
+                        tool_calls=[tool_action.model_dump()] if tool_action else None
+                    )
+                    logger.info(f"✅ AI MESSAGE SAVED (TOOL ACTION) | conv: {conversation_id}")
+                except Exception as e:
+                    logger.error(f"❌ FAILED TO SAVE AI MESSAGE | conv: {conversation_id} | error: {e}", exc_info=True)
 
             return AgentResponse(
-                response=f"I've completed the action: {result}",
+                response=ai_response,
                 session_id=session_id
             )
 
@@ -451,6 +483,19 @@ Would you like to:
             })
 
             await state_manager.save_state(state)
+            
+            # 🤖 SAVE AI MESSAGE TO DATABASE
+            if conversation_id:
+                try:
+                    await conversation_manager.add_message_to_db(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=response_text,
+                        tokens_used=None  # TODO: Track tokens from LLM response
+                    )
+                    logger.info(f"✅ AI MESSAGE SAVED | conv: {conversation_id} | length: {len(response_text)}")
+                except Exception as e:
+                    logger.error(f"❌ FAILED TO SAVE AI MESSAGE | conv: {conversation_id} | error: {e}", exc_info=True)
 
             return AgentResponse(
                 response=response_text,
@@ -568,10 +613,8 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
         # For Google API tools (Gmail, Calendar, Docs), use user's OAuth tokens
         if tool_action.tool_type in [ToolType.GMAIL, ToolType.CALENDAR, ToolType.DOCS]:
             if not user or not user.google_tokens:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Please sign in with Google to use this feature"
-                )
+                logger.warning(f"User {user.user_id if user else 'Unauthenticated'} tried to use {tool_action.tool_type} without Google tokens")
+                return "Action failed: Please sign in with Google to use this feature (Gmail, Calendar, Docs)."
             
             # Create Google credentials from user's tokens
             from google.oauth2.credentials import Credentials
@@ -1066,24 +1109,35 @@ async def get_conversation(conversation_id: str):
 
 
 @app.get("/api/conversations/{conversation_id}/messages")
-async def get_conversation_messages(
+async def get_conversation_messages_endpoint(
     conversation_id: str,
-    limit: Optional[int] = Query(None, description="Number of messages to retrieve")
+    limit: Optional[int] = Query(None, description="Maximum number of messages to return")
 ):
-    """Get messages for a specific conversation."""
+    """
+    Get all messages for a specific conversation.
+    
+    This retrieves messages from the separate messages collection,
+    enabling scalable message storage and retrieval.
+    """
+    logger.info(f"📨 GET MESSAGES REQUEST | conv: {conversation_id} | limit: {limit}")
+    
     try:
-        messages = await conversation_manager.get_conversation_history(
+        messages = await conversation_manager.get_messages(
             conversation_id=conversation_id,
             limit=limit
         )
         
-        return {
+        result = {
             "conversation_id": conversation_id,
-            "messages": [m.model_dump() for m in messages],
+            "messages": [msg.model_dump() for msg in messages],
             "total": len(messages)
         }
+        
+        logger.info(f"✅ MESSAGES RETRIEVED | conv: {conversation_id} | count: {len(messages)}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error getting conversation messages: {e}")
+        logger.error(f"❌ GET MESSAGES FAILED | conv: {conversation_id} | error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1103,7 +1157,7 @@ async def create_conversation(
         
         return conversation.model_dump()
     except Exception as e:
-        logger.error(f"Error creating conversation: {e}")
+        logger.error(f"Error creating conversation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
