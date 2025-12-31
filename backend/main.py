@@ -148,12 +148,24 @@ async def health_check():
 async def download_file(filename: str):
     """Download generated PDF/Doc files."""
     from fastapi.responses import FileResponse
-    from tools.pdf_tool import PDFDocTool
     import os
+    import glob
     
     try:
-        pdf_tool = PDFDocTool()
-        filepath = pdf_tool.get_file(filename)
+        # Search for file in generated_docs directory (including user subdirectories)
+        base_dir = "generated_docs"
+        
+        # Try direct path first
+        filepath = os.path.join(base_dir, filename)
+        
+        # If not found, search in user subdirectories
+        if not os.path.exists(filepath):
+            search_pattern = os.path.join(base_dir, "*", filename)
+            matches = glob.glob(search_pattern)
+            if matches:
+                filepath = matches[0]
+            else:
+                raise FileNotFoundError(f"File {filename} not found")
         
         # Determine content type
         if filename.endswith('.pdf'):
@@ -664,10 +676,11 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
         elif tool_action.tool_type == ToolType.DOCS:
             from tools.docs_tool_v2 import DocsToolV2
             docs_tool = DocsToolV2(creds)
-            return await execute_docs_action(docs_tool, tool_action)
+            return await execute_docs_action(docs_tool, tool_action, user)
         
         elif tool_action.tool_type == ToolType.SLACK:
-            slack_tool = SlackTool(settings.slack_bot_token)
+            from tools.slack_tool_v2 import SlackToolV2
+            slack_tool = SlackToolV2(settings.slack_bot_token)
             return await execute_slack_action(slack_tool, tool_action)
         
         # elif tool_action.tool_type == ToolType.SMS:
@@ -908,7 +921,7 @@ async def execute_docs_action(docs_tool, tool_action: ToolAction, user: Optional
     params = tool_action.parameters
     
     if action == "create_document":
-        from tools.pdf_tool import PDFDocTool
+        from tools.pdf_tool_v2 import PDFToolV2
         from utils.config import get_settings
         from datetime import datetime
         import logging
@@ -950,8 +963,9 @@ async def execute_docs_action(docs_tool, tool_action: ToolAction, user: Optional
         
         content = doc_data["content"]
         
-        # Initialize PDF/Doc tool
-        pdf_tool = PDFDocTool()
+        # Initialize PDF/Doc tool with user isolation
+        user_id = user.user_id if user else "anonymous"
+        pdf_tool = PDFToolV2(user_id=user_id)
         
         # Generate document based on format
         if doc_format == "docx" or doc_format == "doc":
@@ -973,8 +987,10 @@ async def execute_docs_action(docs_tool, tool_action: ToolAction, user: Optional
         download_url = f"http://{settings.host}:{settings.port}/download/{result['filename']}"
         
         # Format file size
-        size_mb = result['size_bytes'] / (1024 * 1024)
-        size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{result['size_bytes'] / 1024:.2f} KB"
+        import os
+        file_size_bytes = os.path.getsize(result['filepath'])
+        size_mb = file_size_bytes / (1024 * 1024)
+        size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{file_size_bytes / 1024:.2f} KB"
         
         completion_msg = f"""✅ **{format_name} Created Successfully!**
 
@@ -998,6 +1014,8 @@ Or copy this link: {download_url}
 💡 Tip: Right-click the link and select "Save As" to download directly."""
         
         return completion_msg
+    
+    else:
         raise ValueError(f"Unknown Docs action: {action}")
 
 
