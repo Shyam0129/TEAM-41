@@ -1,5 +1,5 @@
 """FastAPI application for AI Assistant backend."""
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
