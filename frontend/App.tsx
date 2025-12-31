@@ -85,7 +85,8 @@ export default function App() {
           }
 
           // Fetch user data
-          const response = await fetch('http://localhost:8000/auth/me', {
+          const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+          const response = await fetch(`${apiUrl}/auth/me`, {
             headers: {
               'Authorization': `Bearer ${accessToken}`
             }
