@@ -33,6 +33,11 @@ from routes.auth_routes import router as auth_router
 from models.user import User
 from services.user_service import UserService
 
+# Security imports
+from middleware.security_headers import SecurityHeadersMiddleware
+from middleware.rate_limiter import limiter, init_rate_limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +70,9 @@ async def lifespan(app: FastAPI):
     )
     await state_manager.connect()
     
+    # Initialize Rate Limiter with Redis
+    init_rate_limiter(settings.redis_url)
+    
     # Initialize Conversation Manager
     global conversation_manager
     conversation_manager = ConversationManager(mongodb_client)
@@ -91,6 +99,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +116,10 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret_key
 )
+
+# Add rate limiter state to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Initialize JWT handler
 init_jwt_handler(
@@ -145,27 +160,37 @@ async def health_check():
 
 
 @app.get("/download/{filename}")
-async def download_file(filename: str):
-    """Download generated PDF/Doc files."""
+@limiter.limit("20/minute")  # Rate limit downloads
+async def download_file(
+    request: Request,
+    filename: str,
+    current_user: User = Depends(get_current_user)  # Require authentication
+):
+    """
+    Download generated PDF/Doc files.
+    Requires authentication and validates file access.
+    """
     from fastapi.responses import FileResponse
-    import os
-    import glob
+    from utils.security import validate_filename, get_safe_file_path
     
     try:
-        # Search for file in generated_docs directory (including user subdirectories)
+        # Validate filename to prevent path traversal
+        safe_filename = validate_filename(filename, allowed_extensions=['.pdf', '.docx'])
+        
+        # Construct safe filepath
         base_dir = "generated_docs"
+        filepath = get_safe_file_path(base_dir, safe_filename)
         
-        # Try direct path first
-        filepath = os.path.join(base_dir, filename)
+        # Check if file exists
+        if not filepath.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="File not found"
+            )
         
-        # If not found, search in user subdirectories
-        if not os.path.exists(filepath):
-            search_pattern = os.path.join(base_dir, "*", filename)
-            matches = glob.glob(search_pattern)
-            if matches:
-                filepath = matches[0]
-            else:
-                raise FileNotFoundError(f"File {filename} not found")
+        # TODO: Add user ownership validation
+        # For now, we trust that authenticated users can only access their files
+        # In production, add: verify file belongs to current_user.user_id
         
         # Determine content type
         if filename.endswith('.pdf'):
@@ -175,28 +200,45 @@ async def download_file(filename: str):
         else:
             media_type = 'application/octet-stream'
         
+        logger.info(f"File download: {filename} by user {current_user.user_id}")
+        
         return FileResponse(
-            path=filepath,
+            path=str(filepath),
             media_type=media_type,
             filename=filename,
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": f"attachment; filename={filename}",
+                "X-Content-Type-Options": "nosniff"  # Prevent MIME sniffing
             }
         )
-    except FileNotFoundError:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="File not found")
+    except HTTPException:
+        raise
     except Exception as e:
-        from fastapi import HTTPException
-        logger.error(f"Error downloading file: {e}")
+        logger.error(f"Error downloading file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error downloading file")
 
 
 @app.post("/chat", response_model=AgentResponse)
-async def chat(request: UserRequest, current_user: Optional[User] = Depends(get_optional_user)):
+@limiter.limit("30/minute")  # Rate limit chat requests
+async def chat(
+    request_obj: Request,
+    request: UserRequest,
+    current_user: Optional[User] = Depends(get_optional_user)
+):
+    from utils.security import sanitize_message_content, validate_user_id, validate_session_id, validate_conversation_id
+    
     try:
+        # Validate and sanitize inputs
+        sanitize_message_content(request.message)
+        validate_user_id(request.user_id)
+        
         session_id = request.session_id or str(uuid.uuid4())
-        conversation_id = request.conversation_id  # Get from request
+        if request.session_id:
+            validate_session_id(session_id)
+            
+        conversation_id = request.conversation_id
+        if conversation_id:
+            validate_conversation_id(conversation_id)
         
         logger.info(f"🔵 CHAT START | user: {request.user_id} | session: {session_id} | conv: {conversation_id}")
 
@@ -628,38 +670,23 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
                 logger.warning(f"User {user.user_id if user else 'Unauthenticated'} tried to use {tool_action.tool_type} without Google tokens")
                 return "Action failed: Please sign in with Google to use this feature (Gmail, Calendar, Docs)."
             
-            # Create Google credentials from user's tokens
-            from google.oauth2.credentials import Credentials
+            # Create Google credentials using helper (gets client_id/secret from environment)
             from google.auth.transport.requests import Request as GoogleRequest
+            from utils.google_auth_helper import create_google_credentials, update_google_tokens_dict
             
-            google_tokens = user.google_tokens
-            creds = Credentials(
-                token=google_tokens.get('access_token'),
-                refresh_token=google_tokens.get('refresh_token'),
-                token_uri=google_tokens.get('token_uri'),
-                client_id=google_tokens.get('client_id'),
-                client_secret=google_tokens.get('client_secret'),
-                scopes=google_tokens.get('scopes')
-            )
+            creds = create_google_credentials(user.google_tokens)
             
             # Refresh if expired
             if creds.expired and creds.refresh_token:
                 logger.info(f"Refreshing Google token for user {user.user_id}")
                 creds.refresh(GoogleRequest())
                 
-                # Update tokens in database
+                # Update tokens in database (without client secrets)
                 user_service = UserService()
+                updated_tokens = update_google_tokens_dict(creds)
                 await user_service.update_google_tokens(
                     user.user_id,
-                    {
-                        'access_token': creds.token,
-                        'refresh_token': creds.refresh_token,
-                        'token_uri': creds.token_uri,
-                        'client_id': creds.client_id,
-                        'client_secret': creds.client_secret,
-                        'scopes': creds.scopes,
-                        'expiry': creds.expiry.isoformat() if creds.expiry else None
-                    }
+                    updated_tokens
                 )
         
         # Execute based on tool type
@@ -1085,14 +1112,29 @@ async def websocket_chat_endpoint(
 # ============================================================================
 
 @app.get("/api/conversations")
+@limiter.limit("60/minute")
 async def get_user_conversations(
+    request: Request,
     user_id: str = Query(..., description="User ID"),
     limit: int = Query(50, description="Number of conversations to retrieve"),
     skip: int = Query(0, description="Number of conversations to skip"),
-    include_archived: bool = Query(False, description="Include archived conversations")
+    include_archived: bool = Query(False, description="Include archived conversations"),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get all conversations for a user."""
+    """Get all conversations for a user. Requires authentication."""
+    from utils.security import validate_user_id
+    
     try:
+        # Validate user_id
+        validate_user_id(user_id)
+        
+        # Ensure user can only access their own conversations
+        if user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own conversations"
+            )
+        
         conversations = await conversation_manager.get_user_conversations(
             user_id=user_id,
             limit=limit,
@@ -1110,9 +1152,19 @@ async def get_user_conversations(
 
 
 @app.get("/api/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
-    """Get a specific conversation by ID."""
+@limiter.limit("60/minute")
+async def get_conversation(
+    request: Request,
+    conversation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get a specific conversation by ID. Requires authentication."""
+    from utils.security import validate_conversation_id
+    
     try:
+        # Validate conversation_id
+        validate_conversation_id(conversation_id)
+        
         conversation = await conversation_manager.get_conversation(conversation_id)
         
         if not conversation:
@@ -1127,19 +1179,28 @@ async def get_conversation(conversation_id: str):
 
 
 @app.get("/api/conversations/{conversation_id}/messages")
+@limiter.limit("60/minute")
 async def get_conversation_messages_endpoint(
+    request: Request,
     conversation_id: str,
-    limit: Optional[int] = Query(None, description="Maximum number of messages to return")
+    limit: Optional[int] = Query(None, description="Maximum number of messages to return"),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get all messages for a specific conversation.
+    Requires authentication.
     
     This retrieves messages from the separate messages collection,
     enabling scalable message storage and retrieval.
     """
+    from utils.security import validate_conversation_id
+    
     logger.info(f"📨 GET MESSAGES REQUEST | conv: {conversation_id} | limit: {limit}")
     
     try:
+        # Validate conversation_id
+        validate_conversation_id(conversation_id)
+        
         messages = await conversation_manager.get_messages(
             conversation_id=conversation_id,
             limit=limit

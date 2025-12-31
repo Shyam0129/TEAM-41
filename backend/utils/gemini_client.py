@@ -3,6 +3,7 @@ import google.generativeai as genai
 from typing import Optional, Dict, Any, List
 import logging
 import json
+from .system_prompts import get_system_prompt, get_intent_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +65,20 @@ class GeminiClient:
     
     def start_chat(self, history: Optional[List[Dict[str, str]]] = None):
         """
-        Start a chat session.
+        Start a chat session with system prompt.
         
         Args:
             history: Optional chat history
         """
-        self.chat = self.model.start_chat(history=history or [])
+        # Initialize with system prompt
+        system_message = {"role": "user", "parts": [get_system_prompt()]}
+        chat_history = [system_message]
+        
+        # Add existing history if provided
+        if history:
+            chat_history.extend(history)
+        
+        self.chat = self.model.start_chat(history=chat_history)
     
     def send_message(self, message: str) -> str:
         """
@@ -149,37 +158,9 @@ class GeminiClient:
         Returns:
             Classified intent
         """
-        prompt = f"""
-        Classify the intent of the following user message into one of these categories:
-        
-        Gmail intents:
-        - send_email: User wants to send an email
-        - read_email: User wants to read/list emails
-        - search_email: User wants to search for specific emails
-        - get_unread_emails: User wants to see unread emails
-        - reply_to_email: User wants to reply to an email
-        
-        Calendar intents:
-        - create_calendar_event: User wants to create a calendar event
-        - list_calendar_events: User wants to list calendar events
-        - search_calendar_events: User wants to search for specific events
-        - update_calendar_event: User wants to update an existing event
-        - delete_calendar_event: User wants to delete an event
-        - get_today_events: User wants to see today's events
-        - get_week_events: User wants to see this week's events
-        
-        Other intents:
-        - create_document: User wants to create a document
-        - send_slack_message: User wants to send a Slack message
-        - send_sms: User wants to send an SMS
-        - general_query: General question or conversation
-        
-        User message: {user_message}
-        
-        Return only the intent category, nothing else.
-        """
-        
         try:
+            # Use centralized prompt
+            prompt = get_intent_prompt(user_message)
             intent = self.generate_response(prompt, temperature=0.3).strip().lower()
             return intent
         

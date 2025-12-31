@@ -38,14 +38,14 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     backend_url: str = "http://localhost:8000"
     
-    # JWT Settings
-    jwt_secret_key: str = "your-jwt-secret-key-change-in-production"
+    # JWT Settings - MUST be set in production
+    jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 15  # 15 minutes for security
     jwt_refresh_token_expire_days: int = 7  # 7 days
     
-    # Session
-    session_secret_key: str = "your-session-secret-key-change-in-production"
+    # Session - MUST be set in production
+    session_secret_key: str
     
     # MongoDB Database Name
     mongodb_db_name: str = "rexie_dev"
@@ -69,13 +69,13 @@ class Settings(BaseSettings):
     twilio_auth_token: Optional[str] = None
     twilio_phone_number: Optional[str] = None
     
-    # Security
-    secret_key: str = "your-secret-key-change-in-production"
+    # Security - DEPRECATED, use jwt_secret_key instead
+    secret_key: Optional[str] = None
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
-    # CORS
-    cors_origins: list = ["*"]
+    # CORS - Specific origins only, never use "*" in production
+    cors_origins: list = ["http://localhost:3000", "http://localhost:8000"]
     
     class Config:
         env_file = ".env"

@@ -133,19 +133,11 @@ async def get_user_google_credentials(
         )
     
     # Check if token is expired and refresh if needed
-    from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
-    from datetime import datetime
+    from utils.google_auth_helper import create_google_credentials, update_google_tokens_dict
     
-    creds_dict = current_user.google_tokens
-    creds = Credentials(
-        token=creds_dict.get('access_token'),
-        refresh_token=creds_dict.get('refresh_token'),
-        token_uri=creds_dict.get('token_uri'),
-        client_id=creds_dict.get('client_id'),
-        client_secret=creds_dict.get('client_secret'),
-        scopes=creds_dict.get('scopes')
-    )
+    # Create credentials using helper (gets client_id/secret from environment)
+    creds = create_google_credentials(current_user.google_tokens)
     
     # Refresh if expired
     if creds.expired and creds.refresh_token:
@@ -153,29 +145,15 @@ async def get_user_google_credentials(
         try:
             creds.refresh(Request())
             
-            # Update user's tokens in database
+            # Update user's tokens in database (without client secrets)
             user_service = UserService()
+            updated_tokens = update_google_tokens_dict(creds)
             await user_service.update_google_tokens(
                 current_user.user_id,
-                {
-                    'access_token': creds.token,
-                    'refresh_token': creds.refresh_token,
-                    'token_uri': creds.token_uri,
-                    'client_id': creds.client_id,
-                    'client_secret': creds.client_secret,
-                    'scopes': creds.scopes,
-                    'expiry': creds.expiry.isoformat() if creds.expiry else None
-                }
+                updated_tokens
             )
             
-            return {
-                'access_token': creds.token,
-                'refresh_token': creds.refresh_token,
-                'token_uri': creds.token_uri,
-                'client_id': creds.client_id,
-                'client_secret': creds.client_secret,
-                'scopes': creds.scopes
-            }
+            return updated_tokens
         except Exception as e:
             logger.error(f"Failed to refresh Google token: {e}")
             raise HTTPException(

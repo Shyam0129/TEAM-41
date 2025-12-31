@@ -86,12 +86,12 @@ async def auth_callback(request: Request):
         logger.info(f"OAuth callback for user: {user_info.get('email')}")
         
         # Prepare Google tokens for storage
+        # SECURITY: Never store client_secret in database!
+        # It should only exist in environment variables
         google_tokens = {
             'access_token': token.get('access_token'),
             'refresh_token': token.get('refresh_token'),
             'token_uri': 'https://oauth2.googleapis.com/token',
-            'client_id': settings.google_client_id,
-            'client_secret': settings.google_client_secret,
             'scopes': token.get('scope', '').split(),
             'expiry': token.get('expires_at')
         }

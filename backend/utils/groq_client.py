@@ -3,6 +3,7 @@ from groq import Groq
 from typing import Optional, Dict, Any, List
 import logging
 import json
+from .system_prompts import get_system_prompt, get_intent_prompt, get_email_prompt, get_document_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +58,19 @@ class GroqClient:
     
     def start_chat(self, history: Optional[List[Dict[str, str]]] = None):
         """
-        Start a chat session.
+        Start a chat session with system prompt.
         
         Args:
             history: Optional chat history
         """
-        self.chat_history = history or []
+        # Initialize with system prompt
+        system_message = {"role": "system", "content": get_system_prompt()}
+        self.chat_history = [system_message]
+        
+        # Add any existing history
+        if history:
+            self.chat_history.extend(history)
+        
         return self
     
     def send_message(self, message: str, temperature: float = 0.7) -> str:
@@ -157,30 +165,9 @@ Return ONLY valid JSON, no other text."""
             Classified intent
         """
         try:
-            prompt = f"""Classify the following user message into ONE of these intents:
-
-Intents:
-- send_email: User wants to send an email
-- read_email: User wants to read/view emails
-- search_email: User wants to search for specific emails
-- get_unread_emails: User wants to see unread emails
-- reply_to_email: User wants to reply to an email
-- create_calendar_event: User wants to create a calendar event
-- list_calendar_events: User wants to list calendar events
-- search_calendar_events: User wants to search calendar events
-- update_calendar_event: User wants to update an event
-- delete_calendar_event: User wants to delete an event
-- get_today_events: User wants today's events
-- get_week_events: User wants this week's events
-- create_document: User wants to create a document
-- send_slack_message: User wants to send a Slack message
-- send_sms: User wants to send an SMS
-- general_query: General question or conversation
-
-User message: "{user_message}"
-
-Return ONLY the intent name, nothing else."""
-
+            # Use centralized prompt
+            prompt = get_intent_prompt(user_message)
+            
             response = self.generate_response(prompt, temperature=0.1)
             intent = response.strip().lower()
             
@@ -222,29 +209,9 @@ Return ONLY the intent name, nothing else."""
             Dictionary with 'subject' and 'body' keys
         """
         try:
-            context_str = f"\nAdditional context: {context}" if context else ""
+            # Use centralized prompt
+            prompt = get_email_prompt(recipient, purpose, context or "", tone)
             
-            prompt = f"""Generate a brief, professional email with the following details:
-
-Recipient: {recipient}
-Purpose: {purpose}{context_str}
-Tone: {tone}
-
-Requirements:
-1. Create a clear, concise subject line (max 10 words)
-2. Write a brief email body (2-4 paragraphs maximum)
-3. Use professional language and proper email etiquette
-4. Include appropriate greeting and closing
-5. Keep it concise and to the point, like ChatGPT would write
-
-Return the email in this EXACT JSON format:
-{{
-    "subject": "Your subject line here",
-    "body": "Your email body here with proper formatting"
-}}
-
-Return ONLY the JSON, no other text."""
-
             response = self.generate_response(prompt, temperature=0.7)
             
             # Parse JSON response
@@ -378,41 +345,9 @@ Return ONLY the JSON, no other text."""
             Dictionary with 'title' and 'content' keys
         """
         try:
-            length_instructions = {
-                "brief": "2-3 pages, concise and to the point",
-                "detailed": "5-7 pages, comprehensive coverage",
-                "comprehensive": "10+ pages, in-depth analysis"
-            }
+            # Use centralized prompt
+            prompt = get_document_prompt(topic, document_type, length)
             
-            length_instruction = length_instructions.get(length, length_instructions["detailed"])
-            
-            prompt = f"""Generate a professional, well-structured document about: {topic}
-
-Document Type: {document_type}
-Length: {length_instruction}
-
-Requirements:
-1. Create a clear, professional title
-2. Structure the content with multiple sections using ## for section headers
-3. Include:
-   - Introduction/Overview
-   - Main content divided into logical sections
-   - Key points and important information
-   - Practical examples or applications (if relevant)
-   - Conclusion or summary
-4. Use professional language
-5. Make it informative, accurate, and engaging
-6. Include bullet points where appropriate
-7. Ensure the content is detailed and comprehensive
-
-Format the response as JSON:
-{{
-    "title": "Professional Document Title",
-    "content": "## Introduction\\n\\nIntroduction text here...\\n\\n## Section 1\\n\\nContent here...\\n\\n## Section 2\\n\\nMore content..."
-}}
-
-Generate ONLY the JSON, no other text."""
-
             response = self.generate_response(prompt, temperature=0.7, max_tokens=4000)
             
             # Parse JSON response
