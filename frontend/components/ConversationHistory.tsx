@@ -7,18 +7,25 @@ interface ConversationHistoryProps {
     currentConversationId?: string;
     onSelectConversation: (conversationId: string) => void;
     onNewConversation: () => void;
+    searchTerm?: string;
 }
 
 export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
     userId,
     currentConversationId,
     onSelectConversation,
-    onNewConversation
+    onNewConversation,
+    searchTerm = ''
 }) => {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(true);
     const [showArchived, setShowArchived] = useState(false);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+    // Filter conversations based on search term
+    const filteredConversations = conversations.filter(conv =>
+        (conv.title || 'New Conversation').toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
     useEffect(() => {
         loadConversations();
@@ -116,13 +123,13 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
 
             {/* Conversations List */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {conversations.length === 0 ? (
+                {filteredConversations.length === 0 ? (
                     <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                        {showArchived ? 'No archived conversations' : 'No conversations yet'}
+                        {searchTerm ? 'No matching conversations' : (showArchived ? 'No archived conversations' : 'No conversations yet')}
                     </div>
                 ) : (
                     <div className="p-2 space-y-1">
-                        {conversations.map((conversation) => (
+                        {filteredConversations.map((conversation) => (
                             <div
                                 key={conversation.conversation_id}
                                 onClick={() => onSelectConversation(conversation.conversation_id)}
@@ -187,7 +194,7 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
                                                 {formatDate(conversation.updated_at)}
                                             </span>
                                             <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                • {conversation.messages.length} messages
+                                                • {conversation.message_count || 0} messages
                                             </span>
                                         </div>
                                     </div>

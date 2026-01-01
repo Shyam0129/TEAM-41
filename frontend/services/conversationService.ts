@@ -13,6 +13,7 @@ export interface Conversation {
     created_at: string;
     updated_at: string;
     is_archived: boolean;
+    message_count: number;
     total_tokens: number;
     metadata?: Record<string, any>;
 }
@@ -77,6 +78,15 @@ export interface UserStats {
     last_login: string;
 }
 
+// Helper to get headers with auth token
+const getHeaders = () => {
+    const token = localStorage.getItem('access_token');
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+    };
+};
+
 /**
  * Get all conversations for a user
  */
@@ -88,7 +98,10 @@ export const getUserConversations = async (
 ): Promise<{ conversations: Conversation[]; total: number }> => {
     try {
         const response = await fetch(
-            `${API_BASE_URL}/api/conversations?user_id=${userId}&limit=${limit}&skip=${skip}&include_archived=${includeArchived}`
+            `${API_BASE_URL}/api/conversations?user_id=${userId}&limit=${limit}&skip=${skip}&include_archived=${includeArchived}`,
+            {
+                headers: getHeaders()
+            }
         );
 
         if (!response.ok) {
@@ -107,7 +120,9 @@ export const getUserConversations = async (
  */
 export const getConversation = async (conversationId: string): Promise<Conversation> => {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}`);
+        const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}`, {
+            headers: getHeaders()
+        });
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -132,7 +147,9 @@ export const getConversationMessages = async (
             ? `${API_BASE_URL}/api/conversations/${conversationId}/messages?limit=${limit}`
             : `${API_BASE_URL}/api/conversations/${conversationId}/messages`;
 
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: getHeaders()
+        });
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -159,7 +176,8 @@ export const createConversation = async (
             : `${API_BASE_URL}/api/conversations?user_id=${userId}&session_id=${sessionId}`;
 
         const response = await fetch(url, {
-            method: 'POST'
+            method: 'POST',
+            headers: getHeaders()
         });
 
         if (!response.ok) {
@@ -184,7 +202,8 @@ export const updateConversation = async (
         const response = await fetch(
             `${API_BASE_URL}/api/conversations/${conversationId}?title=${encodeURIComponent(title)}`,
             {
-                method: 'PATCH'
+                method: 'PATCH',
+                headers: getHeaders()
             }
         );
 
@@ -205,7 +224,8 @@ export const updateConversation = async (
 export const deleteConversation = async (conversationId: string): Promise<{ message: string }> => {
     try {
         const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getHeaders()
         });
 
         if (!response.ok) {
@@ -225,7 +245,8 @@ export const deleteConversation = async (conversationId: string): Promise<{ mess
 export const archiveConversation = async (conversationId: string): Promise<{ message: string }> => {
     try {
         const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/archive`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getHeaders()
         });
 
         if (!response.ok) {

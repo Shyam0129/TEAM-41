@@ -59,6 +59,7 @@ export default function App() {
   // Auth modal state
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -367,6 +368,8 @@ export default function App() {
         setActiveNav={setActiveNav}
         onNewChat={handleNewChat}
         onPromptSelect={handleSidebarPromptSelect}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
       >
         {activeNav === 'chat' && (
           <ConversationHistory
@@ -374,8 +377,10 @@ export default function App() {
             currentConversationId={currentConversationId || undefined}
             onSelectConversation={handleSelectConversation}
             onNewConversation={handleNewChat}
+            searchTerm={searchTerm}
           />
         )}
+
       </Sidebar>
 
       {/* Main Content */}

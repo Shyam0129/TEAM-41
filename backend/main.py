@@ -221,33 +221,33 @@ async def download_file(
 @app.post("/chat", response_model=AgentResponse)
 @limiter.limit("30/minute")  # Rate limit chat requests
 async def chat(
-    request_obj: Request,
-    request: UserRequest,
+    request: Request,
+    user_request: UserRequest,
     current_user: Optional[User] = Depends(get_optional_user)
 ):
     from utils.security import sanitize_message_content, validate_user_id, validate_session_id, validate_conversation_id
     
     try:
         # Validate and sanitize inputs
-        sanitize_message_content(request.message)
-        validate_user_id(request.user_id)
+        sanitize_message_content(user_request.message)
+        validate_user_id(user_request.user_id)
         
-        session_id = request.session_id or str(uuid.uuid4())
-        if request.session_id:
+        session_id = user_request.session_id or str(uuid.uuid4())
+        if user_request.session_id:
             validate_session_id(session_id)
             
-        conversation_id = request.conversation_id
+        conversation_id = user_request.conversation_id
         if conversation_id:
             validate_conversation_id(conversation_id)
         
-        logger.info(f"🔵 CHAT START | user: {request.user_id} | session: {session_id} | conv: {conversation_id}")
+        logger.info(f"🔵 CHAT START | user: {user_request.user_id} | session: {session_id} | conv: {conversation_id}")
 
         state = await state_manager.get_state(session_id)
 
         if not state:
             state = ConversationState(
                 session_id=session_id,
-                user_id=request.user_id,
+                user_id=user_request.user_id,
                 status=ConversationStatus.PENDING
             )
         
@@ -257,7 +257,7 @@ async def chat(
                 await conversation_manager.add_message_to_db(
                     conversation_id=conversation_id,
                     role="user",
-                    content=request.message,
+                    content=user_request.message,
                     tokens_used=0  # User messages don't consume tokens
                 )
                 logger.info(f"✅ USER MESSAGE SAVED | conv: {conversation_id}")
@@ -267,7 +267,7 @@ async def chat(
 
         # 🔥 CONFIRMATION HANDLER
         if state.status == ConversationStatus.AWAITING_CONFIRMATION:
-            user_reply = request.message.strip().lower()
+            user_reply = user_request.message.strip().lower()
 
             # Handle email-specific commands
             if state.pending_action and state.pending_action.tool_type == ToolType.GMAIL:
@@ -341,10 +341,10 @@ async def chat(
 
             # Handle standard yes/no confirmations for other actions
             if user_reply in ["yes", "y", "confirm"]:
-                return await confirm_action(session_id, confirmed=True)
+                return await confirm_pending_action(session_id, True, current_user)
 
             if user_reply in ["no", "n", "cancel"]:
-                return await confirm_action(session_id, confirmed=False)
+                return await confirm_pending_action(session_id, False, current_user)
 
             if user_reply == "modify":
                 state.status = ConversationStatus.PENDING
@@ -360,7 +360,7 @@ async def chat(
         # Add user message to history
         state.conversation_history.append({
             "role": "user",
-            "content": request.message,
+            "content": user_request.message,
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -384,7 +384,7 @@ async def chat(
         # Multi-tool handling
         from utils.multi_tool_handler import MultiToolHandler
         multi_handler = MultiToolHandler(llm_client)
-        multi_analysis = multi_handler.analyze_request(request.message)
+        multi_analysis = multi_handler.analyze_request(user_request.message)
         
         if multi_analysis.get("is_multi_tool"):
             tasks = multi_analysis["tasks"]
@@ -420,7 +420,7 @@ async def chat(
             return AgentResponse(response=combined, session_id=session_id, action_required=False)
         
         # Single tool handling
-        analysis = llm_router.analyze_request(request.message)
+        analysis = llm_router.analyze_request(user_request.message)
 
         tool_action = llm_router.create_tool_action(
             analysis["intent"],
@@ -432,13 +432,13 @@ async def chat(
             if tool_action.tool_type == ToolType.GMAIL and tool_action.action == "send_email":
                 # Generate brief, professional email
                 recipient = tool_action.parameters.get("to", "")
-                purpose = tool_action.parameters.get("body", request.message)
+                purpose = tool_action.parameters.get("body", user_request.message)
                 
                 # Use LLM to generate professional email
                 email_content = llm_client.generate_email(
                     recipient=recipient,
                     purpose=purpose,
-                    context=request.message
+                    context=user_request.message
                 )
                 
                 # Update parameters with generated content
@@ -528,7 +528,7 @@ Would you like to:
             )
 
         else:
-            response_text = llm_client.generate_response(request.message)
+            response_text = llm_client.generate_response(user_request.message)
 
             state.conversation_history.append({
                 "role": "assistant",
@@ -1128,8 +1128,13 @@ async def get_user_conversations(
         # Validate user_id
         validate_user_id(user_id)
         
+        last_log_id = f"check_{user_id}_{current_user.user_id}"
+        logger.info(f"🔍 CONV CHECK | Query User: {user_id} | Token User: {current_user.user_id}")
+        
         # Ensure user can only access their own conversations
+        # STRICT EQUALITY CHECK for Production Security
         if user_id != current_user.user_id:
+            logger.warning(f"⛔ ACCESS DENIED | User {current_user.user_id} tried to access {user_id}'s conversations")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only access your own conversations"
@@ -1221,17 +1226,33 @@ async def get_conversation_messages_endpoint(
 
 
 @app.post("/api/conversations")
+@limiter.limit("20/minute")
 async def create_conversation(
+    request: Request,
     user_id: str = Query(..., description="User ID"),
     session_id: str = Query(..., description="Session ID"),
-    first_message: Optional[str] = Query(None, description="First message to initialize conversation")
+    first_message: Optional[str] = Query(None, description="First message to initialize conversation"),
+    current_user: User = Depends(get_current_user)
 ):
-    """Create a new conversation."""
+    """Create a new conversation. Requires authentication."""
+    from utils.security import validate_user_id
+    
     try:
+        # Validate user_id
+        validate_user_id(user_id)
+        
+        # Ensure user can only create conversations for themselves
+        if user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only create conversations for yourself"
+            )
+            
         conversation = await conversation_manager.create_conversation(
             user_id=user_id,
             session_id=session_id,
-            first_message=first_message
+            first_message=first_message,
+            llm_client=llm_client
         )
         
         return conversation.model_dump()
@@ -1241,12 +1262,28 @@ async def create_conversation(
 
 
 @app.patch("/api/conversations/{conversation_id}")
+@limiter.limit("30/minute")
 async def update_conversation(
+    request: Request,
     conversation_id: str,
-    title: Optional[str] = Query(None, description="New conversation title")
+    title: Optional[str] = Query(None, description="New conversation title"),
+    current_user: User = Depends(get_current_user)
 ):
-    """Update a conversation."""
+    """Update a conversation. Requires authentication."""
+    from utils.security import validate_conversation_id
+    
     try:
+        # Validate conversation_id
+        validate_conversation_id(conversation_id)
+        
+        # Verify ownership
+        conversation = await conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+             raise HTTPException(status_code=404, detail="Conversation not found")
+             
+        if conversation.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this conversation")
+            
         if title:
             success = await conversation_manager.update_conversation_title(
                 conversation_id=conversation_id,
@@ -1267,9 +1304,26 @@ async def update_conversation(
 
 
 @app.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
-    """Delete a conversation."""
+@limiter.limit("20/minute")
+async def delete_conversation(
+    request: Request,
+    conversation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a conversation. Requires authentication."""
+    from utils.security import validate_conversation_id
+    
     try:
+        validate_conversation_id(conversation_id)
+        
+        # Verify ownership
+        conversation = await conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+             raise HTTPException(status_code=404, detail="Conversation not found")
+             
+        if conversation.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this conversation")
+
         success = await conversation_manager.delete_conversation(conversation_id)
         
         if not success:
@@ -1284,9 +1338,26 @@ async def delete_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/archive")
-async def archive_conversation(conversation_id: str):
-    """Archive a conversation."""
+@limiter.limit("30/minute")
+async def archive_conversation(
+    request: Request,
+    conversation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Archive a conversation. Requires authentication."""
+    from utils.security import validate_conversation_id
+    
     try:
+        validate_conversation_id(conversation_id)
+        
+        # Verify ownership
+        conversation = await conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+             raise HTTPException(status_code=404, detail="Conversation not found")
+             
+        if conversation.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to archive this conversation")
+
         success = await conversation_manager.archive_conversation(conversation_id)
         
         if not success:
@@ -1604,17 +1675,11 @@ async def mcp_get_available_methods(
                 detail="Please sign in with Google to use MCP features"
             )
         
-        from google.oauth2.credentials import Credentials
         from mcp.google_mcp_server import GoogleMCPServer
+        from utils.google_auth_helper import create_google_credentials
         
-        creds = Credentials(
-            token=current_user.google_tokens.get('access_token'),
-            refresh_token=current_user.google_tokens.get('refresh_token'),
-            token_uri=current_user.google_tokens.get('token_uri'),
-            client_id=current_user.google_tokens.get('client_id'),
-            client_secret=current_user.google_tokens.get('client_secret'),
-            scopes=current_user.google_tokens.get('scopes')
-        )
+        # Create credentials using helper
+        creds = create_google_credentials(current_user.google_tokens)
         
         mcp_server = GoogleMCPServer(creds)
         methods = mcp_server.get_available_methods()
@@ -1634,9 +1699,25 @@ async def mcp_get_available_methods(
 # ============================================================================
 
 @app.get("/api/users/{user_id}/stats")
-async def get_user_stats(user_id: str):
-    """Get user statistics."""
+@limiter.limit("20/minute")
+async def get_user_stats(
+    request: Request,
+    user_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get user statistics. Requires authentication."""
+    from utils.security import validate_user_id
+    
     try:
+        # Validate user_id
+        validate_user_id(user_id)
+        
+        # Access control
+        if user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own statistics"
+            )
         profile = await conversation_manager.get_or_create_user_profile(user_id)
         conversations = await conversation_manager.get_user_conversations(
             user_id=user_id,

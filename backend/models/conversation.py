@@ -33,6 +33,7 @@ class Conversation(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="Last update timestamp")
     is_archived: bool = Field(False, description="Whether conversation is archived")
+    message_count: int = Field(0, description="Total number of messages in conversation")
     total_tokens: int = Field(0, description="Total tokens used in conversation")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
 

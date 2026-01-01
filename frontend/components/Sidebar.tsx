@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Home,
@@ -22,9 +22,42 @@ interface SidebarProps {
   onNewChat: () => void;
   onPromptSelect?: (prompt: string) => void;
   children?: React.ReactNode;
+  searchTerm?: string;
+  onSearchChange?: (term: string) => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNav, onNewChat, onPromptSelect, children }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  isOpen,
+  activeNav,
+  setActiveNav,
+  onNewChat,
+  onPromptSelect,
+  children,
+  searchTerm = '',
+  onSearchChange
+}) => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (date: Date) => {
+    // Format: 10.10AM 31/12/25
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const formattedHours = hours % 12 || 12;
+    const formattedMinutes = minutes < 10 ? '0' + minutes : minutes;
+
+    const day = date.getDate();
+    const month = date.getMonth() + 1;
+    const year = date.getFullYear().toString().slice(-2);
+
+    return `${formattedHours}.${formattedMinutes}${ampm} ${day}/${month}/${year}`;
+  };
+
   return (
     <div className={`
       fixed inset-y-0 left-0 z-40 w-72 bg-gray-50 dark:bg-[#0f0f10] text-gray-600 dark:text-gray-300 transform transition-transform duration-300 ease-in-out border-r border-gray-200 dark:border-white/5
@@ -56,6 +89,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNa
           <input
             type="text"
             placeholder="Search chats..."
+            value={searchTerm}
+            onChange={(e) => onSearchChange?.(e.target.value)}
             className="w-full bg-white dark:bg-[#1c1c1e] text-sm text-gray-900 dark:text-gray-200 rounded-lg pl-9 pr-8 py-2 border border-gray-200 dark:border-transparent focus:border-blue-400 dark:focus:border-white/20 focus:outline-none placeholder-gray-400 dark:placeholder-gray-600 shadow-sm"
           />
         </div>
@@ -87,6 +122,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeNav, setActiveNa
             No conversations yet
           </div>
         )}
+      </div>
+
+      {/* Clock Footer */}
+      <div className="p-3 border-t border-gray-200 dark:border-white/5 bg-gray-50/50 dark:bg-[#0f0f10]/50 backdrop-blur-sm">
+        <div className="text-center">
+          <p className="text-xs font-mono font-medium text-gray-500 dark:text-gray-400">
+            {formatTime(currentTime)}
+          </p>
+        </div>
       </div>
     </div>
   );

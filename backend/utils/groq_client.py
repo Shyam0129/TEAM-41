@@ -380,3 +380,28 @@ Return ONLY the JSON, no other text."""
                 "title": topic,
                 "content": f"Failed to generate content for: {topic}"
             }
+    def generate_title(self, text: str) -> str:
+        """
+        Generate a short, concise title for a conversation based on the first message.
+        
+        Args:
+            text: First message content
+            
+        Returns:
+            Generated title
+        """
+        try:
+            prompt = f"""Generate a very short, concise title (max 6 words) for a conversation that starts with this message:
+            
+            "{text}"
+            
+            Return ONLY the title text, nothing else. Do not use quotes."""
+            
+            response = self.generate_response(prompt, temperature=0.5, max_tokens=20)
+            title = response.strip().strip('"')
+            return title
+            
+        except Exception as e:
+            logger.error(f"Failed to generate title: {e}")
+            # Fallback
+            return " ".join(text.split()[:5]) + "..."

@@ -34,15 +34,17 @@ class ConversationManager:
         self,
         user_id: str,
         session_id: str,
-        first_message: Optional[str] = None
+        first_message: Optional[str] = None,
+        llm_client: Any = None
     ) -> Conversation:
         """Create a new conversation."""
         conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
         
         # Generate title from first message if provided
+        # Generate title from first message if provided
         title = None
         if first_message:
-            title = self._generate_title(first_message)
+            title = await self._generate_title_async(first_message, llm_client) if llm_client else self._generate_title(first_message)
         
         conversation = Conversation(
             conversation_id=conversation_id,
@@ -92,7 +94,8 @@ class ConversationManager:
             {
                 "$push": {"messages": message.model_dump()},
                 "$set": {"updated_at": datetime.utcnow()},
-                "$inc": {"total_tokens": tokens_used or 0}
+                "$set": {"updated_at": datetime.utcnow()},
+                "$inc": {"total_tokens": tokens_used or 0, "message_count": 1}
             }
         )
         
@@ -148,7 +151,8 @@ class ConversationManager:
             {"conversation_id": conversation_id},
             {
                 "$set": {"updated_at": datetime.utcnow()},
-                "$inc": {"total_tokens": tokens_used or 0}
+                "$set": {"updated_at": datetime.utcnow()},
+                "$inc": {"total_tokens": tokens_used or 0, "message_count": 1}
             }
         )
         
@@ -431,8 +435,16 @@ class ConversationManager:
         )
         return result > 0
 
+    async def _generate_title_async(self, message: str, llm_client: Any) -> str:
+        """Generate a title using LLM."""
+        try:
+            return llm_client.generate_title(message)
+        except Exception as e:
+            logger.error(f"Failed to generate title with LLM: {e}")
+            return self._generate_title(message)
+
     def _generate_title(self, message: str, max_length: int = 50) -> str:
-        """Generate a title from the first message."""
+        """Generate a title from the first message (fallback)."""
         # Remove extra whitespace
         title = " ".join(message.split())
         
