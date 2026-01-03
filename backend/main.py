@@ -676,18 +676,22 @@ async def execute_tool_action(tool_action, user: Optional[User] = None):
             
             creds = create_google_credentials(user.google_tokens)
             
-            # Refresh if expired
+            # Refresh if expired - with error handling
             if creds.expired and creds.refresh_token:
-                logger.info(f"Refreshing Google token for user {user.user_id}")
-                creds.refresh(GoogleRequest())
-                
-                # Update tokens in database (without client secrets)
-                user_service = UserService()
-                updated_tokens = update_google_tokens_dict(creds)
-                await user_service.update_google_tokens(
-                    user.user_id,
-                    updated_tokens
-                )
+                try:
+                    logger.info(f"Refreshing Google token for user {user.user_id}")
+                    creds.refresh(GoogleRequest())
+                    
+                    # Update tokens in database (without client secrets)
+                    user_service = UserService()
+                    updated_tokens = update_google_tokens_dict(creds)
+                    await user_service.update_google_tokens(
+                        user.user_id,
+                        updated_tokens
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to refresh Google token: {e}")
+                    return "Action failed: Your Google session has expired. Please sign out and sign in again to reconnect."
         
         # Execute based on tool type
         if tool_action.tool_type == ToolType.GMAIL:
@@ -1251,8 +1255,7 @@ async def create_conversation(
         conversation = await conversation_manager.create_conversation(
             user_id=user_id,
             session_id=session_id,
-            first_message=first_message,
-            llm_client=llm_client
+            first_message=first_message
         )
         
         return conversation.model_dump()

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # MongoDB
     mongodb_url: str = "mongodb://mongodb:27017"
-    mongodb_database: str = "ai_assistant"
+    mongodb_database: str = "rexie_dev"
     
     # Redis
     redis_url: str = "redis://redis:6379"

@@ -8,6 +8,7 @@ interface ConversationHistoryProps {
     onSelectConversation: (conversationId: string) => void;
     onNewConversation: () => void;
     searchTerm?: string;
+    refreshTrigger?: number; // Increment this to force reload
 }
 
 export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
@@ -15,7 +16,8 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
     currentConversationId,
     onSelectConversation,
     onNewConversation,
-    searchTerm = ''
+    searchTerm = '',
+    refreshTrigger = 0
 }) => {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(true);
@@ -28,8 +30,14 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
     );
 
     useEffect(() => {
+        // Don't load conversations if user is not authenticated
+        if (userId === 'anonymous' || !userId) {
+            setLoading(false);
+            setConversations([]);
+            return;
+        }
         loadConversations();
-    }, [userId, showArchived]);
+    }, [userId, showArchived, refreshTrigger]);
 
     const loadConversations = async () => {
         try {
@@ -43,6 +51,7 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
             setConversations(convos);
         } catch (error) {
             console.error('Error loading conversations:', error);
+            setConversations([]); // Clear conversations on error
         } finally {
             setLoading(false);
         }
@@ -123,7 +132,12 @@ export const ConversationHistory: React.FC<ConversationHistoryProps> = ({
 
             {/* Conversations List */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {filteredConversations.length === 0 ? (
+                {userId === 'anonymous' || !userId ? (
+                    <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <p className="mb-2">🔒 Log in to see your conversation history</p>
+                        <p className="text-xs">Your conversations will be saved and synced across devices</p>
+                    </div>
+                ) : filteredConversations.length === 0 ? (
                     <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
                         {searchTerm ? 'No matching conversations' : (showArchived ? 'No archived conversations' : 'No conversations yet')}
                     </div>

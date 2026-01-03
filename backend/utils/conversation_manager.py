@@ -151,7 +151,6 @@ class ConversationManager:
             {"conversation_id": conversation_id},
             {
                 "$set": {"updated_at": datetime.utcnow()},
-                "$set": {"updated_at": datetime.utcnow()},
                 "$inc": {"total_tokens": tokens_used or 0, "message_count": 1}
             }
         )

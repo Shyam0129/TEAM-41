@@ -61,6 +61,9 @@ export default function App() {
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Trigger to refresh conversation list
+  const [conversationRefreshTrigger, setConversationRefreshTrigger] = useState(0);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -207,6 +210,9 @@ export default function App() {
           conversationId: conversation.conversation_id,
           title: conversation.title
         });
+
+        // Trigger conversation list refresh
+        setConversationRefreshTrigger(prev => prev + 1);
       } catch (error) {
         logger.error("❌ CONVERSATION CREATE FAILED", error);
         // Continue anyway - chat can work without persistence
@@ -250,6 +256,9 @@ export default function App() {
       if (response.suggested_actions && response.suggested_actions.length > 0) {
         console.log('Suggested actions:', response.suggested_actions);
       }
+
+      // Refresh conversation list to update message count and timestamp
+      setConversationRefreshTrigger(prev => prev + 1);
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -378,6 +387,7 @@ export default function App() {
             onSelectConversation={handleSelectConversation}
             onNewConversation={handleNewChat}
             searchTerm={searchTerm}
+            refreshTrigger={conversationRefreshTrigger}
           />
         )}
 
